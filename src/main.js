@@ -12,7 +12,278 @@ import { MockGiftProvider } from './gift/MockGiftProvider.js';
 // ══════════════════════════════════════════════════════════
 
 let liveSecs = 0;
-let _currentNavIndex = parseInt(localStorage.getItem('nemo-nav-tab') ?? '3'); // Restore saved tab
+let _currentNavIndex = 3; // Default: TikTok LIVE — restored from localStorage after DOMContentLoaded
+
+// ─── URL ROUTING ─────────────────────────────────────────
+const _NAV_ROUTES = {
+  0: 'dashboard',
+  1: 'avatar-studio',
+  2: 'wallet',
+  3: 'live',
+  4: 'gift-rules',
+  5: 'live-log',
+  6: 'settings',
+  7: 'users',
+};
+const _ROUTE_TO_NAV = Object.fromEntries(Object.entries(_NAV_ROUTES).map(([k, v]) => [v, parseInt(k)]));
+
+function _syncUrlToNav(navIndex, replace = false) {
+  const route = '/' + (_NAV_ROUTES[navIndex] || 'live');
+  if (location.pathname !== route) {
+    if (replace) {
+      history.replaceState(null, '', route);
+    } else {
+      history.pushState(null, '', route);
+    }
+  }
+}
+
+function _getNavFromUrl() {
+  const path = location.pathname.replace(/^\//, '');
+  return path && _ROUTE_TO_NAV[path] !== undefined ? _ROUTE_TO_NAV[path] : null;
+}
+
+// ─── USER STORE (localStorage) ────────────────────────────
+const _DEFAULT_ADMIN = { id: 'admin', username: 'admin', displayName: 'Administrator', password: 'admin123645', role: 'admin', createdAt: Date.now() };
+
+function _getUserStore() {
+  try {
+    const data = JSON.parse(localStorage.getItem('nemo-users') || '[]');
+    if (!data.length) { _saveUserStore([_DEFAULT_ADMIN]); return [_DEFAULT_ADMIN]; }
+    // Ensure admin always exists
+    if (!data.find(u => u.username === 'admin')) { data.unshift(_DEFAULT_ADMIN); _saveUserStore(data); }
+    return data;
+  } catch { _saveUserStore([_DEFAULT_ADMIN]); return [_DEFAULT_ADMIN]; }
+}
+
+function _saveUserStore(users) {
+  localStorage.setItem('nemo-users', JSON.stringify(users));
+}
+
+function _addUser(username, displayName, password, role = 'user') {
+  const users = _getUserStore();
+  if (users.find(u => u.username === username)) return { ok: false, msg: 'Tên đăng nhập đã tồn tại' };
+  const newUser = { id: 'u_' + Date.now().toString(36), username, displayName: displayName || username, password, role, createdAt: Date.now() };
+  users.push(newUser);
+  _saveUserStore(users);
+  return { ok: true, user: newUser };
+}
+
+function _deleteUser(id) {
+  let users = _getUserStore();
+  const target = users.find(u => u.id === id);
+  if (target?.username === 'admin') return false; // Cannot delete admin
+  users = users.filter(u => u.id !== id);
+  _saveUserStore(users);
+  return true;
+}
+
+function _updateUser(id, updates) {
+  const users = _getUserStore();
+  const user = users.find(u => u.id === id);
+  if (!user) return false;
+  if (updates.displayName) user.displayName = updates.displayName;
+  if (updates.password) user.password = updates.password;
+  if (updates.role && user.username !== 'admin') user.role = updates.role; // Admin role cannot be changed
+  _saveUserStore(users);
+  return true;
+}
+
+// ─── AUTH STATE ──────────────────────────────────────────
+function _isLoggedIn() {
+  return localStorage.getItem('nemo-auth') === 'true';
+}
+
+function _getAuthUser() {
+  try { return JSON.parse(localStorage.getItem('nemo-auth-user') || '{}'); } catch { return {}; }
+}
+
+function _isAdmin() {
+  return _getAuthUser().role === 'admin';
+}
+
+function _login(username, password) {
+  const users = _getUserStore();
+  const user = users.find(u => u.username === username && u.password === password);
+  if (!user) return { ok: false, msg: 'Sai tên đăng nhập hoặc mật khẩu' };
+  localStorage.setItem('nemo-auth', 'true');
+  localStorage.setItem('nemo-auth-user', JSON.stringify({ id: user.id, username: user.username, displayName: user.displayName, role: user.role, loginAt: Date.now() }));
+  return { ok: true };
+}
+
+function _logout() {
+  localStorage.removeItem('nemo-auth');
+  localStorage.removeItem('nemo-auth-user');
+  _renderLoginScreen();
+  history.replaceState(null, '', '/');
+}
+
+// ─── SHARED AUTH SCREEN STYLES ───────────────────────────
+const _AUTH_BG = `min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#080D18 0%,#0d1528 40%,#1a0a2e 100%);position:relative;overflow:hidden`;
+const _AUTH_ORBS = `<div style="position:absolute;width:400px;height:400px;border-radius:50%;background:radial-gradient(circle,rgba(233,30,140,0.15),transparent 70%);top:-100px;right:-100px;animation:float 8s ease-in-out infinite"></div>
+<div style="position:absolute;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,rgba(124,58,237,0.12),transparent 70%);bottom:-80px;left:-80px;animation:float 10s ease-in-out infinite reverse"></div>`;
+const _AUTH_LOGO = `<div style="text-align:center;margin-bottom:36px">
+  <div style="width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,var(--pk),var(--pp));display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 8px 32px rgba(233,30,140,0.3)">
+    <svg viewBox="0 0 24 24" fill="#fff" width="32" height="32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+  </div>
+  <h1 style="font-size:28px;font-weight:800;color:#fff;margin:0 0 6px;letter-spacing:0.5px">Nemo Studio</h1>
+  <p style="font-size:13px;color:var(--tm);margin:0">TikTok LIVE & VTuber Control Studio</p>
+</div>`;
+const _AUTH_INPUT = `width:100%;height:44px;padding:0 14px 0 40px;border-radius:10px;border:1px solid var(--bd-l);background:var(--bg-i);color:var(--t1);font-size:13px;outline:none;transition:border-color 0.2s,box-shadow 0.2s;box-sizing:border-box`;
+const _AUTH_BTN = `height:46px;border:none;border-radius:10px;background:linear-gradient(135deg,var(--pk),var(--pp));color:#fff;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s;margin-top:4px;letter-spacing:0.3px;width:100%`;
+const _AUTH_FLOAT = `<style>@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-20px)}}</style>`;
+
+function _inputField(id, type, placeholder, icon) {
+  return `<div style="position:relative">
+    <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:16px;opacity:0.5">${icon}</span>
+    <input id="${id}" type="${type}" placeholder="${placeholder}" required
+      style="${_AUTH_INPUT}"
+      onfocus="this.style.borderColor='var(--pk)';this.style.boxShadow='0 0 0 3px rgba(233,30,140,0.15)'"
+      onblur="this.style.borderColor='var(--bd-l)';this.style.boxShadow='none'" />
+  </div>`;
+}
+
+// ─── LOGIN SCREEN ─────────────────────────────────────
+function _renderLoginScreen() {
+  document.getElementById('app').innerHTML = `
+  <div style="${_AUTH_BG}">
+    ${_AUTH_ORBS}
+    <div style="width:100%;max-width:420px;padding:20px;z-index:1">
+      ${_AUTH_LOGO}
+      <div style="background:var(--bg-p);border:1px solid var(--bd-l);border-radius:16px;padding:32px;box-shadow:0 16px 64px rgba(0,0,0,0.4)">
+        <h2 style="font-size:18px;font-weight:700;color:var(--t1);margin:0 0 24px;text-align:center">Đăng nhập</h2>
+        <form id="login-form" style="display:flex;flex-direction:column;gap:16px" autocomplete="off">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:12px;font-weight:600;color:var(--t2)">Tên đăng nhập</label>
+            ${_inputField('login-username', 'text', 'Nhập username', '👤')}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:12px;font-weight:600;color:var(--t2)">Mật khẩu</label>
+            ${_inputField('login-password', 'password', 'Nhập mật khẩu', '🔒')}
+          </div>
+          <div id="login-error" style="display:none;font-size:12px;color:var(--er);background:var(--er-bg);padding:8px 12px;border-radius:8px;text-align:center"></div>
+          <button type="submit" style="${_AUTH_BTN}"
+            onmouseenter="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 24px rgba(233,30,140,0.35)'"
+            onmouseleave="this.style.transform='';this.style.boxShadow=''">Đăng nhập</button>
+        </form>
+        <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--tm)">
+          Chưa có tài khoản? <a href="#" id="link-register" style="color:var(--pk);font-weight:600;text-decoration:none">Đăng ký ngay</a>
+        </div>
+      </div>
+      <p style="text-align:center;font-size:11px;color:var(--td);margin-top:20px">© 2024 Nemo Studio — All rights reserved</p>
+    </div>
+  </div>
+  ${_AUTH_FLOAT}`;
+
+  // Bind login
+  document.getElementById('login-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const username = document.getElementById('login-username')?.value?.trim();
+    const password = document.getElementById('login-password')?.value;
+    const errorEl = document.getElementById('login-error');
+    if (!username || !password) {
+      if (errorEl) { errorEl.textContent = '❌ Vui lòng nhập đầy đủ thông tin'; errorEl.style.display = 'block'; }
+      return;
+    }
+    const result = _login(username, password);
+    if (result.ok) {
+      _currentNavIndex = 0;
+      localStorage.setItem('nemo-nav-tab', '0');
+      _bootApp();
+    } else {
+      if (errorEl) { errorEl.textContent = `❌ ${result.msg}`; errorEl.style.display = 'block'; }
+    }
+  });
+
+  // Link to register
+  document.getElementById('link-register')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    _renderRegisterScreen();
+  });
+}
+
+// ─── REGISTER SCREEN ──────────────────────────────────
+function _renderRegisterScreen() {
+  document.getElementById('app').innerHTML = `
+  <div style="${_AUTH_BG}">
+    ${_AUTH_ORBS}
+    <div style="width:100%;max-width:420px;padding:20px;z-index:1">
+      ${_AUTH_LOGO}
+      <div style="background:var(--bg-p);border:1px solid var(--bd-l);border-radius:16px;padding:32px;box-shadow:0 16px 64px rgba(0,0,0,0.4)">
+        <h2 style="font-size:18px;font-weight:700;color:var(--t1);margin:0 0 24px;text-align:center">Đăng ký tài khoản</h2>
+        <form id="register-form" style="display:flex;flex-direction:column;gap:14px" autocomplete="off">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:12px;font-weight:600;color:var(--t2)">Tên đăng nhập</label>
+            ${_inputField('reg-username', 'text', 'Nhập username', '👤')}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:12px;font-weight:600;color:var(--t2)">Tên hiển thị</label>
+            ${_inputField('reg-display', 'text', 'Nhập tên hiển thị', '✨')}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:12px;font-weight:600;color:var(--t2)">Mật khẩu</label>
+            ${_inputField('reg-password', 'password', 'Nhập mật khẩu (tối thiểu 6 ký tự)', '🔒')}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:12px;font-weight:600;color:var(--t2)">Xác nhận mật khẩu</label>
+            ${_inputField('reg-confirm', 'password', 'Nhập lại mật khẩu', '🔁')}
+          </div>
+          <div id="reg-error" style="display:none;font-size:12px;color:var(--er);background:var(--er-bg);padding:8px 12px;border-radius:8px;text-align:center"></div>
+          <div id="reg-success" style="display:none;font-size:12px;color:var(--sc);background:var(--sc-bg);padding:8px 12px;border-radius:8px;text-align:center"></div>
+          <button type="submit" style="${_AUTH_BTN}"
+            onmouseenter="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 24px rgba(233,30,140,0.35)'"
+            onmouseleave="this.style.transform='';this.style.boxShadow=''">Đăng ký</button>
+        </form>
+        <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--tm)">
+          Đã có tài khoản? <a href="#" id="link-login" style="color:var(--pk);font-weight:600;text-decoration:none">Đăng nhập</a>
+        </div>
+      </div>
+      <p style="text-align:center;font-size:11px;color:var(--td);margin-top:20px">© 2024 Nemo Studio — All rights reserved</p>
+    </div>
+  </div>
+  ${_AUTH_FLOAT}`;
+
+  // Bind register
+  document.getElementById('register-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const username = document.getElementById('reg-username')?.value?.trim();
+    const displayName = document.getElementById('reg-display')?.value?.trim();
+    const password = document.getElementById('reg-password')?.value;
+    const confirm = document.getElementById('reg-confirm')?.value;
+    const errorEl = document.getElementById('reg-error');
+    const successEl = document.getElementById('reg-success');
+    errorEl.style.display = 'none';
+    successEl.style.display = 'none';
+
+    if (!username || !password || !confirm) {
+      errorEl.textContent = '❌ Vui lòng nhập đầy đủ thông tin'; errorEl.style.display = 'block'; return;
+    }
+    if (username.length < 3) {
+      errorEl.textContent = '❌ Tên đăng nhập tối thiểu 3 ký tự'; errorEl.style.display = 'block'; return;
+    }
+    if (password.length < 6) {
+      errorEl.textContent = '❌ Mật khẩu tối thiểu 6 ký tự'; errorEl.style.display = 'block'; return;
+    }
+    if (password !== confirm) {
+      errorEl.textContent = '❌ Mật khẩu xác nhận không khớp'; errorEl.style.display = 'block'; return;
+    }
+
+    const result = _addUser(username, displayName, password);
+    if (result.ok) {
+      successEl.textContent = '✅ Đăng ký thành công! Đang chuyển sang đăng nhập...';
+      successEl.style.display = 'block';
+      setTimeout(() => _renderLoginScreen(), 1500);
+    } else {
+      errorEl.textContent = `❌ ${result.msg}`; errorEl.style.display = 'block';
+    }
+  });
+
+  // Link to login
+  document.getElementById('link-login')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    _renderLoginScreen();
+  });
+}
 
 // ─── AVATAR ENGINE (singleton) ───────────────────────────
 const avatarEngine = new AvatarEngine();
@@ -46,14 +317,15 @@ function render() {
       <span class="sb-logo-tx" style="letter-spacing:1px;font-size:18px">Nemo Studio</span>
     </div>
     <nav class="sb-nav">
-      ${[
+       ${[
         {ic:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/></svg>',l:'Bảng điều khiển'},
         {ic:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2L18 7v6l-8 5-8-5V7z"/><path d="M10 13V2M10 13l8-6M10 13l-8-6"/></svg>',l:'Avatar Studio'},
         {ic:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="14" height="10" rx="2"/><path d="M6 5V3h8v2"/><path d="M10 9v4M8 11h4"/></svg>',l:'Ví'},
         {ic:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h3l2-2h4l2 2h3v12H3z"/><circle cx="10" cy="10" r="3"/></svg>',l:'TikTok LIVE'},
         {ic:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2l2.5 5H18l-4 3.5 1.5 5.5L10 13l-5.5 3 1.5-5.5L2 7h5.5z"/></svg>',l:'Kích hoạt quà'},
         {ic:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h12M4 8h12M4 12h8M4 16h6"/></svg>',l:'Nhật ký LIVE'},
-        {ic:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="3"/><path d="M10 2v2M10 16v2M18 10h-2M4 10H2M15.66 4.34l-1.42 1.42M5.76 14.24l-1.42 1.42M15.66 15.66l-1.42-1.42M5.76 5.76L4.34 4.34"/></svg>',l:'Cài đặt'}
+        {ic:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="3"/><path d="M10 2v2M10 16v2M18 10h-2M4 10H2M15.66 4.34l-1.42 1.42M5.76 14.24l-1.42 1.42M15.66 15.66l-1.42-1.42M5.76 5.76L4.34 4.34"/></svg>',l:'Cài đặt'},
+        ..._isAdmin() ? [{ic:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="7" r="3"/><path d="M2 16c0-3 3-5 6-5s6 2 6 5"/><path d="M15 6l2 2 3-3"/></svg>',l:'Quản lý Users'}] : []
       ].map((item,i)=>
         `<div class="sb-ni${i===_currentNavIndex?' act':''}" data-nav="${i}"><span class="sb-ni-ic">${item.ic}</span><span>${item.l}</span></div>`
       ).join('')}
@@ -69,6 +341,12 @@ function render() {
           <div class="tb-str-av" style="width:28px;height:28px;font-size:12px">N</div>
           <div class="tb-str-inf"><span class="tb-str-nm">Nemo Studio</span><span class="tb-str-on" style="color:var(--tm)">v1.2.0</span></div>
         </div>
+        <button id="btn-logout" style="width:100%;height:34px;border:1px solid rgba(239,68,68,0.3);border-radius:8px;background:rgba(239,68,68,0.08);color:#EF4444;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:all 0.2s;margin-top:4px"
+          onmouseenter="this.style.background='rgba(239,68,68,0.15)';this.style.borderColor='rgba(239,68,68,0.5)'"
+          onmouseleave="this.style.background='rgba(239,68,68,0.08)';this.style.borderColor='rgba(239,68,68,0.3)'">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Đăng xuất
+        </button>
         <div class="sb-ver-inf" style="opacity:0.5">© 2024 All rights reserved</div>
       </div>
     </div>
@@ -106,8 +384,47 @@ function render() {
     <!-- CONTENT -->
     <div class="ct">
 
+      <!-- ══════ VIEW: USER MANAGEMENT (index 7) ══════ -->
+      <div id="view-users" class="view-page" style="display:none">
+        <div style="padding:24px;height:100%;overflow-y:auto">
+          <!-- Header -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+            <div>
+              <h2 style="font-size:20px;font-weight:800;color:var(--t1);margin:0 0 4px">👥 Quản lý tài khoản</h2>
+              <p style="font-size:12px;color:var(--tm);margin:0">Quản lý danh sách người dùng hệ thống</p>
+            </div>
+            <button class="bt bt-pk" id="btn-add-user" style="gap:6px;height:38px;padding:0 18px;font-size:13px">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Thêm user
+            </button>
+          </div>
+          <!-- Stats -->
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+            <div class="pn" style="padding:16px;text-align:center">
+              <div style="font-size:24px;font-weight:800;color:var(--pk)" id="um-total">0</div>
+              <div style="font-size:11px;color:var(--tm);margin-top:4px">Tổng users</div>
+            </div>
+            <div class="pn" style="padding:16px;text-align:center">
+              <div style="font-size:24px;font-weight:800;color:var(--pp)" id="um-admin">0</div>
+              <div style="font-size:11px;color:var(--tm);margin-top:4px">Admin</div>
+            </div>
+            <div class="pn" style="padding:16px;text-align:center">
+              <div style="font-size:24px;font-weight:800;color:var(--info)" id="um-user">0</div>
+              <div style="font-size:11px;color:var(--tm);margin-top:4px">User</div>
+            </div>
+          </div>
+          <!-- Table -->
+          <div class="pn" style="padding:0;overflow:hidden">
+            <div style="padding:14px 16px;border-bottom:1px solid var(--bd-l);display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:13px;font-weight:700;color:var(--t1)">Danh sách tài khoản</span>
+            </div>
+            <div id="um-table" style="padding:0"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- ══════ VIEW: COMING SOON ══════ -->
-      <div id="view-coming-soon" class="view-page" style="display:none">
+      <div id="view-coming-soon" class="view-page" style="display:${_currentNavIndex !== 1 && _currentNavIndex !== 3 ? '' : 'none'}">
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:24px;padding:40px">
           <!-- Animated icon -->
           <div style="position:relative;width:96px;height:96px">
@@ -144,7 +461,7 @@ function render() {
       </div>
 
       <!-- ══════ VIEW: TIKTOK LIVE (index 3) ══════ -->
-      <div id="view-live" class="view-page">
+      <div id="view-live" class="view-page" style="display:${_currentNavIndex === 3 ? '' : 'none'}">
       <div class="ws">
         <!-- LEFT: LIVE ACCOUNTS -->
         <div class="pn" style="height:100%">
@@ -210,7 +527,7 @@ function render() {
           <div style="flex:1.2;display:flex;flex-direction:column;min-width:0">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:0 4px">
               <span style="font-size:12px;font-weight:600;color:var(--t1);text-transform:uppercase;letter-spacing:0.04em">AVATAR PREVIEW</span>
-              <div style="display:flex;align-items:center;gap:6px"><span class="sd sd-ok"></span><span style="font-size:11px;color:var(--ok);font-weight:600">${engine.isRunning ? 'Live' : 'Stopped'}</span></div>
+              <div style="display:flex;align-items:center;gap:6px"><span class="sd sd-ok"></span><span style="font-size:11px;color:var(--ok);font-weight:600">${!engine.isRunning ? 'Stopped' : engine.isPaused ? 'Paused' : 'Live'}</span></div>
             </div>
             <div class="avd" id="avatar-display" style="flex:1">
               <!-- Real WebGL canvas moved here by switchView() -->
@@ -236,16 +553,15 @@ function render() {
               <div style="font-size:12px;font-weight:600;color:var(--t1);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:12px">LIVE CONTROL</div>
               <div style="display:flex;flex-direction:column;gap:10px">
                 <button class="lc-b lc-st" id="btn-engine-start" style="height:44px;border-radius:12px;justify-content:flex-start;padding-left:20px;gap:16px;border:none">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> 
-                  ${engine.isRunning ? 'Tạm dừng' : 'Bắt đầu Avatar'}
+                  ${!engine.isRunning ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Bắt đầu Avatar' : engine.isPaused ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Tiếp tục' : '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg> Tạm dừng'}
                 </button>
                 <button class="lc-b lc-sc" id="btn-engine-stop" style="height:44px;border-radius:12px;justify-content:flex-start;padding-left:20px;gap:16px;background:var(--bg-p);border:1px solid var(--bd-l)">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                  Tạm dừng
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
+                  Dừng
                 </button>
                 <button class="lc-b lc-sc" id="btn-engine-skip" style="height:44px;border-radius:12px;justify-content:flex-start;padding-left:20px;gap:16px;background:var(--bg-p);border:1px solid var(--bd-l)">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
-                  Dừng
+                  Bỏ qua
                 </button>
                 <button class="lc-b lc-sc" id="btn-engine-reset" style="height:44px;border-radius:12px;justify-content:flex-start;padding-left:20px;gap:16px;background:var(--bg-p);border:1px solid var(--bd-l)">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-9-9c2.5 0 4.8 1 6.4 2.6L21 8"/><path d="M21 3v5h-5"/></svg>
@@ -305,7 +621,7 @@ function render() {
       </div><!-- /view-live -->
 
       <!-- ══════ VIEW: AVATAR STUDIO (index 2) ══════ -->
-      <div id="view-avatar-studio" class="view-page" style="display:none">
+      <div id="view-avatar-studio" class="view-page" style="display:${_currentNavIndex === 1 ? 'block' : 'none'}">
         <div style="display:grid;grid-template-columns:7fr 5fr;gap:14px;height:100%">
 
           <!-- LEFT: 3D AVATAR PREVIEW -->
@@ -321,13 +637,7 @@ function render() {
             <div class="pn-b pn-b0" style="flex:1;display:flex;flex-direction:column;padding:0">
               <!-- 3D Canvas -->
               <div id="av-studio-canvas-slot" style="flex:1;min-height:200px;position:relative;overflow:hidden">
-              <div id="avatar-canvas-container" style="position:absolute;inset:0;overflow:hidden;background:linear-gradient(180deg,#1a0a2e 0%,#0d0618 40%,#080420 100%)">
-                <div id="avatar-empty-state" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:2;pointer-events:none">
-                  <div style="font-size:48px;opacity:0.3">🎭</div>
-                  <span style="font-size:13px;color:var(--tm);opacity:0.6" id="avatar-empty-label">Chưa có Avatar</span>
-                  <span style="font-size:11px;color:var(--tm);opacity:0.4">Bấm "Import VRM" để bắt đầu</span>
-                </div>
-              </div>
+              <!-- avatar-canvas-container is injected here by engine/restore — not in template to avoid duplicates -->
               </div>
               <!-- Info + Progress -->
               <div style="padding:8px 14px;border-top:1px solid var(--bd-l)">
@@ -367,9 +677,9 @@ function render() {
           <!-- RIGHT: AVATAR LIBRARY + VRMA LIBRARY (50/50 split) -->
           <div style="display:flex;flex-direction:column;gap:14px;overflow:hidden;min-height:0">
 
-
-            <!-- THƯ VIỆN AVATAR (top) -->
-            <div class="pn" style="flex:1 1 0;min-height:0;display:flex;flex-direction:column;overflow:hidden">
+            <div style="display:flex;gap:14px;flex:1 1 0;min-height:0">
+              <!-- THƯ VIỆN AVATAR (left, 6/12) -->
+              <div class="pn" style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">
               <!-- Header -->
               <div class="pn-h" style="padding:8px 14px;display:flex;align-items:center;gap:8px;flex-shrink:0">
                 <span class="pn-t" style="flex-shrink:0">THƯ VIỆN AVATAR</span>
@@ -392,6 +702,45 @@ function render() {
                 <!-- Avatar list (shown when has items) -->
                 <div id="av-studio-vrm-list" style="display:none;flex-direction:column;gap:5px">
                   <!-- Items injected by JS -->
+                </div>
+              </div>
+            </div>
+
+            <!-- NỀN AVATAR (right, 6/12) -->
+              <div class="pn" style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">
+                <!-- Header -->
+                <div class="pn-h" style="padding:8px 14px;display:flex;align-items:center;gap:8px;flex-shrink:0">
+                  <span class="pn-t" style="flex-shrink:0">NỀN AVATAR</span>
+                  <span style="font-size:10px;color:var(--tm)">Tổng:</span>
+                  <span id="av-bg-count" style="font-size:11px;font-weight:700;color:var(--pk)">0</span>
+                  <button id="btn-av-bg-upload" class="bt bt-pk bt-sm" style="margin-left:auto;font-size:10px;padding:4px 10px;flex-shrink:0">＋ Upload</button>
+                </div>
+                <!-- Body -->
+                <div style="flex:1;min-height:0;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:6px">
+                  <!-- Active background controls -->
+                  <div id="av-bg-active-wrap" style="display:none;padding:6px 10px;background:rgba(255,255,255,0.03);border:1px solid var(--bd-l);border-radius:8px;margin-bottom:4px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                      <span style="font-size:10px;color:var(--t2);font-weight:600">Đang dùng: <span id="av-bg-active-name" style="color:var(--pk)"></span></span>
+                      <button id="btn-av-bg-remove" class="bt bt-gh bt-sm" style="font-size:10px;padding:2px 6px">Bỏ nền</button>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <span style="font-size:10px;color:var(--tm)">Opacity</span>
+                      <input id="av-bg-opacity" type="range" min="10" max="100" value="100" style="flex:1;height:3px;accent-color:var(--pk);cursor:pointer"/>
+                      <span id="av-bg-opacity-val" style="font-size:10px;color:var(--t2);width:24px;text-align:right">100%</span>
+                    </div>
+                  </div>
+                  <!-- Drop zone -->
+                  <div id="av-bg-dropzone" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:20px 10px;border:2px dashed var(--bd-l);border-radius:10px;cursor:pointer;transition:border-color 0.2s,background 0.2s;min-height:80px">
+                    <span style="font-size:28px">🖼</span>
+                    <div style="text-align:center">
+                      <div style="font-size:11px;font-weight:600;color:var(--t1);margin-bottom:2px">Kéo thả ảnh (jpg/png)</div>
+                      <div style="font-size:10px;color:var(--tm)">hoặc bấm <strong style="color:var(--pk)">Upload</strong></div>
+                    </div>
+                  </div>
+                  <!-- Background list -->
+                  <div id="av-bg-list" style="display:none;flex-direction:column;gap:5px">
+                    <!-- Items injected by JS -->
+                  </div>
                 </div>
               </div>
             </div>
@@ -468,7 +817,7 @@ function render() {
         <div class="stb-i"><span class="stb-il">Hệ thống</span><span class="sd ${conn.server ? 'sd-ok' : 'sd-er'}"></span><span class="stb-iv" style="color:var(${conn.server ? '--ok' : '--er'})">${conn.server ? 'Tốt' : 'Lỗi'}</span></div>
         <div class="stb-i"><span class="stb-il">TikTok</span><span class="stb-iv" style="color:var(${selectedAcc?.isConnected ? '--ok' : '--tm'})">${selectedAcc?.isConnected ? 'Đã kết nối' : 'Chưa kết nối'}</span></div>
         <div class="stb-i"><span class="stb-il">Lắng nghe quà</span><span class="stb-iv" style="color:var(${settings.receiveGifts ? '--info' : '--tm'})">${settings.receiveGifts ? 'Hoạt động' : 'Tắt'}</span></div>
-        <div class="stb-i"><span class="stb-il">Động cơ Avatar</span><span class="stb-iv" style="color:var(${engine.isRunning ? '--pk' : '--tm'})">${engine.isRunning ? 'Đang chạy' : 'Dừng'}</span></div>
+        <div class="stb-i"><span class="stb-il">Động cơ Avatar</span><span class="stb-iv" style="color:var(${!engine.isRunning ? '--tm' : engine.isPaused ? '--wn' : '--pk'})">${!engine.isRunning ? 'Dừng' : engine.isPaused ? 'Tạm dừng' : 'Đang chạy'}</span></div>
       </div>
       <div class="stb-r">
         <div class="stb-lt"><span>Độ trễ:</span><span class="stb-ltv" id="s-lat">${metrics.latency}ms</span></div>
@@ -491,27 +840,57 @@ function render() {
   <button class="dv-tg" id="btn-devtools">🛠</button>
 </div>`;
 
+  // Reset event-binding guards since innerHTML destroyed all old DOM elements
+  _avLibEventsBound = false;
+  _libPageEventsBound = false;
+  _vrmLibEventsBound = false;
+  _avStudioVrmEventsBound = false;
+
   bindEvents();
   _bindThemeToggle();
 
+  // Bind ALL view events eagerly so import/delete/etc work from any starting page
+  _bindAvLibEvents();
+  _bindLibPageEvents();
+  _bindVrmLibEvents();
+  _bindAvStudioVrmEvents();
+  _bindAvBgEvents();
+
   // ── Restore WebGL canvas into correct slot after re-render ─
   if (_savedCanvas) {
-    const slot = document.getElementById('av-studio-canvas-slot');
-    if (slot && !slot.contains(_savedCanvas)) slot.appendChild(_savedCanvas);
-    // If live view is currently active, move canvas to live slot
-    const liveView = document.getElementById('view-live');
-    if (liveView && liveView.style.display !== 'none') {
-      setTimeout(() => _moveCanvasToSlot('live-canvas-slot'), 0);
+    if (_currentNavIndex === 3) {
+      const slot = document.getElementById('live-canvas-slot');
+      if (slot) {
+        // Remove any stale placeholder content
+        slot.innerHTML = '';
+        slot.appendChild(_savedCanvas);
+      }
+      setTimeout(() => avatarEngine.runtime?.resize?.(), 0);
     } else {
+      const slot = document.getElementById('av-studio-canvas-slot');
+      if (slot) {
+        // Remove any stale placeholder content from template
+        slot.innerHTML = '';
+        slot.appendChild(_savedCanvas);
+      }
       setTimeout(() => avatarEngine.runtime?.resize?.(), 0);
     }
   }
 
-  // Restore libraries from IndexedDB
-  setTimeout(() => {
-    _initVrmStore();
-    _initVrmaStore();
-  }, 200);
+  // Restore libraries from IndexedDB — only on first load when store is empty
+  if (!_vrmStoreInited) {
+    setTimeout(() => {
+      _initVrmStore();
+      _initVrmaStore();
+      _initBgStore();
+
+    }, 500);
+  } else {
+    // Store already loaded — just re-sync UI from in-memory store (DOM was rebuilt by render)
+    _refreshAllVrmUIs();
+    // Sync avatar-empty-state visibility to match current engine state
+    _syncAvatarEmptyState();
+  }
 
   // Bind live VRM dropdown immediately (không cần chờ DB)
   _renderLiveVrmList();
@@ -838,8 +1217,14 @@ function bindEvents() {
     const navIndex = el.dataset.nav;
     _currentNavIndex = parseInt(navIndex);
     localStorage.setItem('nemo-nav-tab', navIndex); // Persist active tab
+    _syncUrlToNav(_currentNavIndex);
     switchView(navIndex);
   }));
+
+  // Logout — re-bind after every render() since DOM is rebuilt
+  document.getElementById('btn-logout')?.addEventListener('click', () => {
+    showConfirm('Bạn có chắc muốn đăng xuất?', () => _logout());
+  });
 
   // ── ACCOUNT MANAGEMENT (local) ───────────────────────────
 
@@ -982,8 +1367,10 @@ function bindEvents() {
   // Engine controls
   document.getElementById('btn-engine-start')?.addEventListener('click', () => {
     const eng = state.get('engine');
-    if (socket?.connected) socket.emit(eng.isRunning ? 'engine:pause' : 'engine:start');
-    else showToast('Server chưa kết nối', 'error');
+    if (!socket?.connected) return showToast('Server chưa kết nối', 'error');
+    if (!eng.isRunning) socket.emit('engine:start');
+    else if (eng.isPaused) socket.emit('engine:resume');
+    else socket.emit('engine:pause');
   });
   document.getElementById('btn-engine-stop')?.addEventListener('click', () => { if (socket?.connected) socket.emit('engine:stop'); });
   document.getElementById('btn-engine-skip')?.addEventListener('click', () => { if (socket?.connected) socket.emit('engine:skip'); });
@@ -1344,10 +1731,16 @@ function setupSocket() {
 
   socket.on('engine:state', (data) => {
     state.set('engine.isRunning', data.running);
+    state.set('engine.isPaused', data.paused);
     const btn = document.getElementById('btn-engine-start');
     if (btn) {
-      btn.innerHTML = `<span class="lc-ic">${data.running ? '⏸' : '▶'}</span>${data.running ? 'Tạm dừng' : 'Bắt đầu Avatar'}`;
+      btn.innerHTML = !data.running 
+        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Bắt đầu Avatar'
+        : data.paused
+        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Tiếp tục'
+        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg> Tạm dừng';
     }
+    render(); // Update status bar
   });
 
   socket.on('engine:ruleMatched', (data) => {
@@ -1387,6 +1780,7 @@ const _NAV_META = [
   { label: 'Kích hoạt quà',   icon: '🎁', pct: 60 },
   { label: 'Nhật ký LIVE',    icon: '📋', pct: 35 },
   { label: 'Cài đặt',         icon: '⚙️', pct: 25 },
+  { label: 'Quản lý Users',   icon: '👥', pct: 100 },
 ];
 
 // Canvas slot teleport helper
@@ -1408,24 +1802,34 @@ function switchView(navIndex) {
   const viewLive       = document.getElementById('view-live');
   const viewAvatar     = document.getElementById('view-avatar-studio');
   const viewComingSoon = document.getElementById('view-coming-soon');
+  const viewUsers      = document.getElementById('view-users');
   const idx = parseInt(navIndex);
 
   // Hide all
-  [viewLive, viewAvatar, viewComingSoon].forEach(v => { if (v) v.style.display = 'none'; });
+  [viewLive, viewAvatar, viewComingSoon, viewUsers].forEach(v => { if (v) v.style.display = 'none'; });
 
   if (navIndex === '1') {
     if (viewAvatar) viewAvatar.style.display = 'block';
-    // Move canvas into Avatar Studio slot
     setTimeout(() => {
       _moveCanvasToSlot('av-studio-canvas-slot');
       refreshAvLib();
       _bindAvStudioVrmEvents();
+      _bindAvBgEvents();
       _renderAvStudioVrmList();
     }, 50);
   } else if (navIndex === '3') {
     if (viewLive) viewLive.style.display = '';
-    // Move canvas into Live page slot
     setTimeout(() => _moveCanvasToSlot('live-canvas-slot'), 50);
+  } else if (navIndex === '7') {
+    // User Management
+    if (!_isAdmin()) {
+      showToast('❌ Chỉ Admin mới có quyền truy cập', 'error');
+      return;
+    }
+    if (viewUsers) {
+      viewUsers.style.display = '';
+      _renderUserManagement();
+    }
   } else {
     // Coming soon
     if (viewComingSoon) viewComingSoon.style.display = '';
@@ -1469,36 +1873,211 @@ function _bindThemeToggle() {
   if (icon) icon.textContent = isLight ? '☀️' : '🌙';
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  // Restore saved theme before first render
+// ─── USER MANAGEMENT RENDER ─────────────────────────────
+function _renderUserManagement() {
+  const users = _getUserStore();
+  const tableEl = document.getElementById('um-table');
+  const totalEl = document.getElementById('um-total');
+  const adminEl = document.getElementById('um-admin');
+  const userEl  = document.getElementById('um-user');
+
+  if (totalEl) totalEl.textContent = users.length;
+  if (adminEl) adminEl.textContent = users.filter(u => u.role === 'admin').length;
+  if (userEl)  userEl.textContent  = users.filter(u => u.role === 'user').length;
+
+  if (!tableEl) return;
+
+  const roleColors = { admin: 'var(--pk)', user: 'var(--info)' };
+  const roleLabels = { admin: '👑 Admin', user: '👤 User' };
+
+  tableEl.innerHTML = users.map(u => `
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--bd-l);transition:background 0.15s"
+      onmouseenter="this.style.background='var(--bg-h)'" onmouseleave="this.style.background=''">
+      <!-- Avatar -->
+      <div style="width:36px;height:36px;border-radius:50%;background:${u.role === 'admin' ? 'linear-gradient(135deg,var(--pk),var(--pp))' : 'var(--bg-ps)'};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:${u.role === 'admin' ? '#fff' : 'var(--t2)'};flex-shrink:0;border:2px solid ${u.role === 'admin' ? 'var(--pk)' : 'var(--bd-l)'}">
+        ${u.displayName?.charAt(0)?.toUpperCase() || 'U'}
+      </div>
+      <!-- Info -->
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:13px;font-weight:700;color:var(--t1)">${u.displayName || u.username}</span>
+          <span style="font-size:9px;font-weight:600;color:${roleColors[u.role] || 'var(--tm)'};background:${roleColors[u.role] || 'var(--tm)'}18;padding:2px 8px;border-radius:20px">${roleLabels[u.role] || u.role}</span>
+        </div>
+        <div style="font-size:11px;color:var(--tm)">@${u.username} • ${new Date(u.createdAt).toLocaleDateString('vi-VN')}</div>
+      </div>
+      <!-- Actions -->
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        ${u.username !== 'admin' ? `
+          <button class="bt bt-sc bt-sm" style="height:28px;padding:0 10px;font-size:10px" data-um-role="${u.id}" title="Đổi quyền">
+            ${u.role === 'admin' ? '👤 → User' : '👑 → Admin'}
+          </button>
+          <button class="bt bt-gh bt-sm" style="height:28px;padding:0 10px;font-size:10px;color:var(--wn)" data-um-reset="${u.id}" title="Reset mật khẩu">
+            🔑
+          </button>
+          <button class="bt bt-gh bt-sm" style="height:28px;padding:0 10px;font-size:10px;color:var(--er)" data-um-del="${u.id}" title="Xóa">
+            🗑
+          </button>
+        ` : '<span style="font-size:10px;color:var(--tm);opacity:0.5">Tài khoản gốc</span>'}
+      </div>
+    </div>
+  `).join('');
+
+  // Bind: Toggle role
+  tableEl.querySelectorAll('[data-um-role]').forEach(btn => btn.addEventListener('click', () => {
+    const id = btn.getAttribute('data-um-role');
+    const u = _getUserStore().find(x => x.id === id);
+    if (!u) return;
+    _updateUser(id, { role: u.role === 'admin' ? 'user' : 'admin' });
+    showToast(`✅ Đã đổi quyền thành ${u.role === 'admin' ? 'User' : 'Admin'}`, 'success');
+    _renderUserManagement();
+  }));
+
+  // Bind: Reset password
+  tableEl.querySelectorAll('[data-um-reset]').forEach(btn => btn.addEventListener('click', () => {
+    const id = btn.getAttribute('data-um-reset');
+    const u = _getUserStore().find(x => x.id === id);
+    showConfirm(`Reset mật khẩu cho "${u?.displayName}"?\nMật khẩu mới: 123456`, () => {
+      _updateUser(id, { password: '123456' });
+      showToast('✅ Đã reset mật khẩu thành "123456"', 'success');
+      _renderUserManagement();  // BUG FIX: re-render table after reset
+    });
+  }));
+
+  // Bind: Delete user
+  tableEl.querySelectorAll('[data-um-del]').forEach(btn => btn.addEventListener('click', () => {
+    const id = btn.getAttribute('data-um-del');
+    const u = _getUserStore().find(x => x.id === id);
+    showConfirm(`Xóa tài khoản "${u?.displayName}"?`, () => {
+      if (_deleteUser(id)) {
+        showToast('✅ Đã xóa tài khoản', 'success');
+        _renderUserManagement();
+      } else {
+        showToast('❌ Không thể xóa tài khoản admin', 'error');
+      }
+    });
+  }));
+
+  // Bind: Add user button
+  document.getElementById('btn-add-user')?.addEventListener('click', () => {
+    showModal({
+      title: 'Thêm tài khoản mới',
+      fields: [
+        { key: 'username', label: 'Tên đăng nhập', type: 'text', value: '' },
+        { key: 'displayName', label: 'Tên hiển thị', type: 'text', value: '' },
+        { key: 'password', label: 'Mật khẩu', type: 'text', value: '' },
+        { key: 'role', label: 'Quyền', type: 'select', value: 'user', options: [{ value: 'user', label: '👤 User' }, { value: 'admin', label: '👑 Admin' }] },
+      ],
+      onSubmit: (data) => {
+        if (!data.username || !data.password) { showToast('❌ Vui lòng nhập đầy đủ', 'error'); return; }
+        if (data.password.length < 6) { showToast('❌ Mật khẩu tối thiểu 6 ký tự', 'error'); return; }
+        const result = _addUser(data.username, data.displayName, data.password, data.role);
+        if (result.ok) {
+          showToast('✅ Đã thêm tài khoản', 'success');
+          _renderUserManagement();
+        } else {
+          showToast(`❌ ${result.msg}`, 'error');
+        }
+      },
+    });
+  });
+}
+
+function _bootApp() {
+  // Restore saved theme
   const savedTheme = localStorage.getItem('sherin-theme');
   if (savedTheme === 'light') _applyTheme(true);
 
-  // Load accounts from localStorage BEFORE first render
+  // Load accounts from localStorage
   try {
     const savedAccounts = JSON.parse(localStorage.getItem('nemo-accounts') || '[]');
     if (savedAccounts.length) state.set('accounts', savedAccounts);
   } catch {}
 
+  // Restore saved nav tab
+  try {
+    const saved = localStorage.getItem('nemo-nav-tab');
+    if (saved !== null) _currentNavIndex = parseInt(saved) || 0;
+  } catch (_) {}
+
   render();
-  // Restore active tab after render
-  const savedNav = localStorage.getItem('nemo-nav-tab') ?? '3';
+  setupSocket();
+  startTimers();
+  initAvatarEngine();
+
+  // Determine initial view: URL path > localStorage > default (Dashboard)
+  const urlNav = _getNavFromUrl();
+  if (urlNav !== null) _currentNavIndex = urlNav;
+  const savedNav = String(_currentNavIndex);
+  _syncUrlToNav(_currentNavIndex, true);
   switchView(savedNav);
   document.querySelectorAll('[data-nav]').forEach(el => {
     el.classList.toggle('act', el.dataset.nav === savedNav);
   });
-  setupSocket();
-  startTimers();
-  initAvatarEngine();
+
+  // Handle browser back/forward
+  window.addEventListener('popstate', () => {
+    if (!_isLoggedIn()) { _renderLoginScreen(); return; }
+    const nav = _getNavFromUrl();
+    if (nav !== null && nav !== _currentNavIndex) {
+      _currentNavIndex = nav;
+      localStorage.setItem('nemo-nav-tab', String(nav));
+      switchView(String(nav));
+      document.querySelectorAll('[data-nav]').forEach(el => {
+        el.classList.toggle('act', el.dataset.nav === String(nav));
+      });
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Restore theme early
+  const savedTheme = localStorage.getItem('sherin-theme');
+  if (savedTheme === 'light') _applyTheme(true);
+
+  const isRoot = location.pathname === '/' || location.pathname === '';
+
+  // Check auth
+  if (_isLoggedIn()) {
+    // If logged in at root, redirect to dashboard
+    if (isRoot) {
+      _currentNavIndex = 0;
+      history.replaceState(null, '', '/dashboard');
+    }
+    _bootApp();
+  } else {
+    // Not logged in → always show login at root
+    _renderLoginScreen();
+    if (!isRoot) history.replaceState(null, '', '/');
+  }
 });
 
 
 // ─── AVATAR ENGINE INIT ─────────────────────────────────
+// Sync the avatar-empty-state overlay visibility based on current engine state
+function _syncAvatarEmptyState() {
+  const emptyEl = document.getElementById('avatar-empty-state');
+  if (!emptyEl) return;
+  // Check if engine has a VRM loaded
+  const hasVrm = !!(avatarEngine?.vrm || avatarEngine?.vrmName);
+  emptyEl.style.display = hasVrm ? 'none' : 'flex';
+}
+
 function initAvatarEngine() {
-  const container = document.getElementById('avatar-canvas-container');
+  // avatar-canvas-container is NOT in the template — create it if not already existing
+  let container = document.getElementById('avatar-canvas-container');
   if (!container) {
-    console.warn('[Boot] avatar-canvas-container not found');
-    return;
+    container = document.createElement('div');
+    container.id = 'avatar-canvas-container';
+    container.style.cssText = 'position:absolute;inset:0;overflow:hidden;background:linear-gradient(180deg,#1a0a2e 0%,#0d0618 40%,#080420 100%)';
+    // Add empty-state overlay inside the container
+    container.innerHTML = `
+      <div id="avatar-empty-state" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:2;pointer-events:none">
+        <div style="font-size:48px;opacity:0.3">🎭</div>
+        <span style="font-size:13px;color:var(--tm);opacity:0.6" id="avatar-empty-label">Chưa có Avatar</span>
+        <span style="font-size:11px;color:var(--tm);opacity:0.4">Bấm "Import VRM" để bắt đầu</span>
+      </div>`;
+    const slot = document.getElementById('av-studio-canvas-slot');
+    if (slot) slot.appendChild(container);
   }
 
   // Init engine
@@ -1519,9 +2098,11 @@ function initAvatarEngine() {
 
   // State changes
   avatarEngine.onStateChange((newState) => {
-    const dotEl = document.getElementById('av-status-dot');
-    const textEl = document.getElementById('av-status-text');
-    const nameEl = document.getElementById('av-name');
+    const dotEl   = document.getElementById('av-status-dot');
+    const textEl  = document.getElementById('av-status-text');
+    const nameEl  = document.getElementById('av-name');
+    const emptyEl = document.getElementById('avatar-empty-state');
+
     if (textEl) textEl.textContent = newState;
     if (dotEl) {
       dotEl.className = 'sd';
@@ -1532,6 +2113,14 @@ function initAvatarEngine() {
     if (nameEl && avatarEngine.vrmName) {
       nameEl.textContent = avatarEngine.vrmName;
     }
+
+    // BUG FIX: Hide empty-state overlay when VRM is loaded, show when unloaded
+    if (emptyEl) {
+      const hasAvatar = newState === 'IDLE' || newState === 'READY' || newState === 'PLAYING';
+      emptyEl.style.display = hasAvatar ? 'none' : 'flex';
+    }
+    // Also keep _syncAvatarEmptyState in sync for future render() calls
+    _syncAvatarEmptyState();
   });
 
   // Animation events
@@ -1798,11 +2387,22 @@ function _renderGrid(cfg, animations) {
     e.stopPropagation();
     const id = btn.dataset[prefix + 'Delete'] || btn.getAttribute(`data-${prefix}-delete`);
     const entry = avatarEngine.animationRegistry.get(id);
-    showConfirm(`Xóa animation "${entry?.name || id}"?`, () => {
+    showConfirm(`Xóa animation "${entry?.name || id}"?`, async () => {
       if (cfg.getCurrentId() === id) { avatarEngine.stopAnimation(); cfg.setCurrentId(null); cfg.hideNowPlaying(); }
       avatarEngine.animationRegistry.remove(id);
-      _vrmaDB.remove(id).catch(e => console.warn('[VrmaDB] remove error:', e));
+
+      // Sync DB: use engine-to-DB map if available, fallback to direct remove
+      const dbRec = _vrmaDbMap.get(id);
+      if (dbRec) {
+        _vrmaDbMap.delete(id);
+        await _vrmaDB.remove(dbRec.id).catch(e => console.warn('[VrmaDB] remove error:', e));
+      } else {
+        // Fallback: try removing by engine ID directly
+        await _vrmaDB.remove(id).catch(e => console.warn('[VrmaDB] remove error:', e));
+      }
       showToast('Đã xóa animation', 'success');
+      _renderGrid(cfg, avatarEngine.animationRegistry.getAll());
+      refreshAvLib();
     });
   }));
 }
@@ -1922,7 +2522,14 @@ const _vrmDB = (() => {
   }
 
   async function saveAll(entries) {
-    // Persist active flags update (e.g. after set-active)
+    // First clear, then re-save remaining entries — prevents stale deleted records
+    const db = await open();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).clear();
+      tx.oncomplete = resolve;
+      tx.onerror = e => reject(e.target.error);
+    });
     for (const entry of entries) await save(entry);
   }
 
@@ -2030,11 +2637,26 @@ const _vrmaDB = (() => {
     });
   }
 
-  return { save, remove, loadAll, clearAll };
+  // Save all: clear DB then re-save remaining entries (ensures no stale records)
+  async function saveAll(entries) {
+    const db = await open();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).clear();
+      tx.oncomplete = resolve;
+      tx.onerror = e => reject(e.target.error);
+    });
+    for (const e of entries) await save(e.id, e.fileName, e.buffer);
+  }
+
+  return { save, remove, loadAll, clearAll, saveAll };
 })();
 
 // Restore VRMA animations from IndexedDB on startup
 let _vrmaStoreInited = false;
+// Map: animationRegistry ID (engine) → { id, fileName, buffer } for DB sync
+const _vrmaDbMap = new Map();
+
 async function _initVrmaStore() {
   if (_vrmaStoreInited) return;
   _vrmaStoreInited = true;
@@ -2042,13 +2664,19 @@ async function _initVrmaStore() {
     const saved = await _vrmaDB.loadAll();
     if (!saved.length) return;
     let count = 0;
-    for (const { file } of saved) {
+    for (const rec of saved) {
       try {
-        await avatarEngine.loadAnimation(file);
+        // Create fresh File from saved buffer for engine
+        const result = await avatarEngine.loadAnimation(rec.file);
+        // Map engine ID → DB record so delete can sync properly
+        _vrmaDbMap.set(result.id, { id: rec.id, fileName: rec.fileName, buffer: rec.file });
         count++;
       } catch (_) {}
     }
-    if (count > 0) showToast(`✅ Đã khôi phục ${count} animation`, 'success');
+    if (count > 0) {
+      showToast(`✅ Đã khôi phục ${count} animation`, 'success');
+      refreshAvLib();
+    }
   } catch (e) {
     console.warn('[VrmaStore] Không thể khôi phục từ IndexedDB:', e);
   }
@@ -2066,18 +2694,52 @@ async function _initVrmStore() {
     const saved = await _vrmDB.loadAll();
     if (!saved.length) return;
     _vrmStore.push(...saved);
+    _refreshAllVrmUIs();
+
     // Restore active avatar into engine
     const active = saved.find(v => v.isActive);
-    if (active?._fileRef) {
-      avatarEngine.loadVRM(active._fileRef)
-        .then(() => showToast(`✅ Đã khôi phục avatar "${active.name}"`, 'success'))
-        .catch(() => {});
+    if (active?._buffer) {
+      // Validate buffer is not empty/detached
+      const byteLen = active._buffer.byteLength ?? 0;
+      console.log(`[VrmStore] Khôi phục "${active.name}" — buffer: ${byteLen} bytes, fileName: ${active.fileName}`);
+
+      if (byteLen === 0) {
+        console.warn('[VrmStore] ❌ Buffer rỗng hoặc bị detach!');
+        showToast(`⚠️ Avatar "${active.name}" bị hỏng — vui lòng import lại.`, 'error');
+        const idx = _vrmStore.findIndex(x => x.id === active.id);
+        if (idx !== -1) _vrmStore.splice(idx, 1);
+        await _vrmDB.saveAll(_vrmStore).catch(() => {});
+        _refreshAllVrmUIs();
+        return;
+      }
+
+      // Create fresh File from buffer for engine
+      const blob = new Blob([active._buffer.slice(0)], { type: 'application/octet-stream' });
+      const file = new File([blob], active.fileName || (active.name + '.vrm'));
+      console.log(`[VrmStore] ✅ File tạo OK — size: ${file.size}, name: ${file.name}`);
+
+      avatarEngine.loadVRM(file)
+        .then(() => {
+          showToast(`✅ Đã khôi phục avatar "${active.name}"`, 'success');
+          _syncAvatarEmptyState();
+          setTimeout(() => {
+            if (document.getElementById('view-avatar-studio')?.style.display !== 'none') {
+              _moveCanvasToSlot('av-studio-canvas-slot');
+            } else if (document.getElementById('view-live')?.style.display !== 'none') {
+              _moveCanvasToSlot('live-canvas-slot');
+            }
+          }, 100);
+        })
+        .catch((err) => {
+          console.error('[VrmStore] Lỗi khôi phục VRM:', err);
+          showToast(`❌ Lỗi khôi phục avatar "${active.name}": ${err.message}`, 'error');
+        });
     }
-    _refreshAllVrmUIs();
   } catch (e) {
     console.warn('[VrmStore] Không thể khôi phục từ IndexedDB:', e);
   }
 }
+
 
 
 function _renderVrmGrid() {
@@ -2127,7 +2789,7 @@ function _renderVrmGrid() {
           <button class="bt bt-sc bt-sm" style="height:30px;padding:0 10px;font-size:11px" data-vrm-load-studio="${v.id}" title="Mở trong Avatar Studio">
             🎬
           </button>
-          <button class="bt bt-gh bt-sm" style="height:30px;padding:0 10px;font-size:11px" data-vrm-delete="${v.id}" title="Xóa" ${isActive ? 'disabled style="opacity:0.4"' : ''}>
+          <button class="bt bt-gh bt-sm" style="height:30px;padding:0 10px;font-size:11px" data-vrm-delete="${v.id}" title="Xóa">
             🗑
           </button>
         </div>
@@ -2144,18 +2806,22 @@ function _renderVrmGrid() {
     const id = btn.getAttribute('data-vrm-load-studio');
     const v = _vrmStore.find(x => x.id === id);
     if (v) {
-      avatarEngine.loadVRM(v._fileRef).catch(e => showToast(`❌ ${e.message}`, 'error'));
-      switchView('1');  // switch to Avatar Studio
+      const src = v._buffer ? new File([v._buffer.slice(0)], v.fileName || v.name + '.vrm') : v._fileRef;
+      if (!src) { showToast('❌ Không tìm thấy file avatar', 'error'); return; }
+      avatarEngine.loadVRM(src).catch(e => showToast(`❌ ${e.message}`, 'error'));
+      switchView('1');
       showToast(`🎬 Đang tải ${v.name} vào Avatar Studio...`, 'success');
     }
   }));
   gridEl.querySelectorAll('[data-vrm-delete]').forEach(btn => btn.addEventListener('click', () => {
     const id = btn.getAttribute('data-vrm-delete');
     const v = _vrmStore.find(x => x.id === id);
-    showConfirm(`Xóa avatar "${v?.name}"?`, () => {
+    showConfirm(`Xóa avatar "${v?.name}"?`, async () => {
+      if (v?.isActive) avatarEngine.unloadVRM();
       const idx = _vrmStore.findIndex(x => x.id === id);
       if (idx !== -1) _vrmStore.splice(idx, 1);
-      _vrmDB.remove(id).catch(e => console.warn('[VrmDB] remove error:', e));
+      // Use saveAll to clear+rewrite — ensures no stale records remain
+      await _vrmDB.saveAll(_vrmStore).catch(e => console.warn('[VrmDB] saveAll error:', e));
       showToast('Đã xóa avatar', 'success');
       _refreshAllVrmUIs();
     });
@@ -2165,12 +2831,30 @@ function _renderVrmGrid() {
 function _setActiveVrm(id) {
   _vrmStore.forEach(v => v.isActive = (v.id === id));
   const v = _vrmStore.find(x => x.id === id);
-  // Persist new active flags
   _vrmDB.saveAll(_vrmStore).catch(e => console.warn('[VrmDB] save error:', e));
-  if (v && v._fileRef) {
-    avatarEngine.loadVRM(v._fileRef)
-      .then(() => { showToast(`✅ Avatar "${v.name}" đã được kích hoạt`, 'success'); _refreshAllVrmUIs(); })
-      .catch(e => showToast(`❌ ${e.message}`, 'error'));
+
+  const doLoad = (file) => {
+    avatarEngine.loadVRM(file)
+      .then(() => {
+        showToast(`✅ Avatar "${v.name}" đã được kích hoạt`, 'success');
+        _refreshAllVrmUIs();
+        // Ensure canvas is in the correct slot for current view
+        setTimeout(() => {
+          if (document.getElementById('view-avatar-studio')?.style.display !== 'none') {
+            _moveCanvasToSlot('av-studio-canvas-slot');
+          } else if (document.getElementById('view-live')?.style.display !== 'none') {
+            _moveCanvasToSlot('live-canvas-slot');
+          }
+        }, 100);
+      })
+      .catch(e => showToast(`❌ Không thể tải avatar: ${e.message}`, 'error'));
+  };
+
+  if (v?._buffer) {
+    const blob = new Blob([v._buffer], { type: 'application/octet-stream' });
+    doLoad(new File([blob], v.fileName || v.name + '.vrm'));
+  } else if (v?._fileRef) {
+    doLoad(v._fileRef);
   }
   _refreshAllVrmUIs();
 }
@@ -2212,32 +2896,45 @@ async function _importVRMFiles(files) {
     const name    = file.name.replace(/\.vrm$/i, '');
     const isFirst = _vrmStore.length === 0;
 
-    // Read file as ArrayBuffer for persistence
-    const buffer = await file.arrayBuffer();
+    // Read buffer ONCE, keep 2 separate .slice() copies:
+    // - buffer   → safe copy for IndexedDB (engine will NOT touch this)
+    // - engineFile → passed to engine (engine may detach its ArrayBuffer internally)
+    const rawBuffer  = await file.arrayBuffer();
+    const buffer     = rawBuffer.slice(0);
+    const engineFile = new File([rawBuffer.slice(0)], file.name);
 
-    // Add to store immediately (with loading state)
-    const entry = { id, name, fileName: file.name, isActive: isFirst, loadedAt: Date.now(), _fileRef: file, _buffer: buffer, _loading: isFirst };
+    const entry = { id, name, fileName: file.name, isActive: isFirst, loadedAt: Date.now(), _fileRef: engineFile, _buffer: buffer, _loading: isFirst };
     _vrmStore.push(entry);
-    _refreshAllVrmUIs();   // show item instantly
+    _refreshAllVrmUIs();
+
+    // Save to DB IMMEDIATELY — buffer is intact at this point
+    await _vrmDB.save(entry).catch(e => console.warn('[VrmDB] save error (import):', e));
 
     if (isFirst) {
       try {
-        await avatarEngine.loadVRM(file);
+        await avatarEngine.loadVRM(engineFile);
         entry._loading = false;
+        entry.isActive = true;
+        // Update isActive flag in DB
+        await _vrmDB.save(entry).catch(() => {});
         showToast(`✅ Avatar "${name}" đã được import và kích hoạt`, 'success');
-        await _vrmDB.save(entry);   // persist only after success
+        _refreshAllVrmUIs();
+        setTimeout(() => {
+          if (document.getElementById('view-avatar-studio')?.style.display !== 'none') {
+            _moveCanvasToSlot('av-studio-canvas-slot');
+          }
+        }, 100);
       } catch (e) {
-        // Remove failed entry
         const idx = _vrmStore.findIndex(x => x.id === id);
         if (idx !== -1) _vrmStore.splice(idx, 1);
+        await _vrmDB.saveAll(_vrmStore).catch(() => {});
         showToast(`❌ Không thể tải "${name}": ${e.message}`, 'error');
+        _refreshAllVrmUIs();
       }
     } else {
-      await _vrmDB.save(entry);   // persist immediately
       showToast(`✅ Avatar "${name}" đã được thêm vào thư viện`, 'success');
+      _refreshAllVrmUIs();
     }
-
-    _refreshAllVrmUIs();
   }
 }
 
@@ -2295,7 +2992,12 @@ function _bindLibPageEvents() {
   document.getElementById('btn-lib-clear-all')?.addEventListener('click', () => {
     showConfirm('Xóa toàn bộ animations?', () => {
       avatarEngine.stopAnimation(); _libCurrentAnimId = null; _hideNowPlayingFor('lib');
-      avatarEngine.animationRegistry.clear(); showToast('Đã xóa toàn bộ', 'success');
+      avatarEngine.animationRegistry.clear();
+      _vrmaDbMap.clear();  // Keep engine-to-DB map in sync
+      _vrmaDB.clearAll().catch(e => console.warn('[VrmaDB] clearAll error:', e));
+      _renderGrid(_libCfg, []);
+      refreshAvLib();
+      showToast('Đã xóa toàn bộ', 'success');
     });
   });
   document.getElementById('lib-btn-pause')?.addEventListener('click', () => {
@@ -2340,7 +3042,12 @@ function _bindAvLibEvents() {
   document.getElementById('btn-av-lib-clear-all')?.addEventListener('click', () => {
     showConfirm('Xóa toàn bộ animations?', () => {
       avatarEngine.stopAnimation(); _avLibCurrentAnimId = null; _hideNowPlayingFor('av-lib');
-      avatarEngine.animationRegistry.clear(); showToast('Đã xóa toàn bộ', 'success');
+      avatarEngine.animationRegistry.clear();
+      _vrmaDbMap.clear();  // Keep engine-to-DB map in sync
+      _vrmaDB.clearAll().catch(e => console.warn('[VrmaDB] clearAll error:', e));
+      _renderGrid(_avLibCfg, []);
+      refreshAvLib();
+      showToast('Đã xóa toàn bộ', 'success');
     });
   });
   document.getElementById('av-lib-btn-pause')?.addEventListener('click', () => {
@@ -2414,10 +3121,12 @@ function _renderAvStudioVrmList() {
   listEl.querySelectorAll('[data-av-studio-vrm-del]').forEach(btn => btn.addEventListener('click', () => {
     const id = btn.getAttribute('data-av-studio-vrm-del');
     const v = _vrmStore.find(x => x.id === id);
-    showConfirm(`Xóa avatar "${v?.name}"?`, () => {
+    showConfirm(`Xóa avatar "${v?.name}"?`, async () => {
+      if (v?.isActive) avatarEngine.unloadVRM();
       const idx = _vrmStore.findIndex(x => x.id === id);
       if (idx !== -1) _vrmStore.splice(idx, 1);
-      _vrmDB.remove(id).catch(e => console.warn('[VrmDB] remove error:', e));
+      // Use saveAll (clear + rewrite) to ensure no stale records remain in DB
+      await _vrmDB.saveAll(_vrmStore).catch(e => console.warn('[VrmDB] saveAll error:', e));
       showToast('Đã xóa avatar', 'success');
       _refreshAllVrmUIs();
     });
@@ -2463,17 +3172,23 @@ async function _importVRMAFiles(files) {
   let success = 0;
   for (const file of files) {
     try {
-      // Read buffer before loading (loadAnimation may consume the file stream)
+      // Read buffer BEFORE engine loads (engine may consume file stream)
       const buffer = await file.arrayBuffer();
-      const result = await avatarEngine.loadAnimation(file);
-      // Persist to IndexedDB using the ID assigned by the engine
+      const safeFile = new File([buffer.slice(0)], file.name);
+      const result = await avatarEngine.loadAnimation(safeFile);
+      // Persist using engine-assigned ID as DB key for proper delete sync
       await _vrmaDB.save(result.id, file.name, buffer);
+      // Track engine-ID → DB-ID mapping (they're the same here, but map helps on restore)
+      _vrmaDbMap.set(result.id, { id: result.id, fileName: file.name, buffer });
       success++;
     } catch (err) {
       showToast(`❌ ${file.name}: ${err.message}`, 'error');
     }
   }
-  if (success > 0) showToast(`✅ Đã import ${success} animation${success > 1 ? 's' : ''}`, 'success');
+  if (success > 0) {
+    showToast(`✅ Đã import ${success} animation${success > 1 ? 's' : ''}`, 'success');
+    refreshAvLib();
+  }
 }
 
 function _showNowPlayingFor(prefix, name, duration) {
@@ -2529,3 +3244,290 @@ function addLogEntry(entry) {
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
+
+
+// ── Avatar Background (BG) Library in-memory store ──────────
+const _bgStore = []; // [{ id, name, fileName, isActive, opacity, objectUrl }]
+
+const _bgDB = (() => {
+  const DB_NAME = 'NemoAvatarBgDB';
+  const STORE = 'bgStore';
+  const VERSION = 1;
+  function open() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, VERSION);
+      req.onupgradeneeded = e => { e.target.result.createObjectStore(STORE, { keyPath: 'id' }); };
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+  async function save(id, fileName, buffer) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put({ id, fileName, buffer, savedAt: Date.now() });
+      tx.oncomplete = resolve;
+      tx.onerror = e => reject(e.target.error);
+    });
+  }
+  async function remove(id) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(id);
+      tx.oncomplete = resolve;
+      tx.onerror = e => reject(e.target.error);
+    });
+  }
+  async function loadAll() {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).getAll();
+      req.onsuccess = e => {
+        const recs = (e.target.result || []).sort((a, b) => a.savedAt - b.savedAt);
+        resolve(recs.map(r => ({ id: r.id, fileName: r.fileName, buffer: r.buffer })));
+      };
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+  async function saveAll(entries) {
+    const db = await open();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).clear();
+      tx.oncomplete = resolve;
+      tx.onerror = e => reject(e.target.error);
+    });
+    for (const e of entries) await save(e.id, e.fileName, e.buffer);
+  }
+  return { save, remove, loadAll, saveAll };
+})();
+
+let _bgStoreInited = false;
+async function _initBgStore() {
+  if (_bgStoreInited) return;
+  _bgStoreInited = true;
+  try {
+    const saved = await _bgDB.loadAll();
+    for (const rec of saved) {
+      const blob = new Blob([rec.buffer]);
+      const objectUrl = URL.createObjectURL(blob);
+      _bgStore.push({
+        id: rec.id,
+        name: rec.fileName,
+        fileName: rec.fileName,
+        isActive: false,
+        opacity: 100,
+        objectUrl: objectUrl,
+        buffer: rec.buffer
+      });
+    }
+    
+    // Restore active state from localStorage
+    const savedActive = localStorage.getItem('av_bg_active_id');
+    const savedOpacity = localStorage.getItem('av_bg_opacity');
+    if (savedActive) {
+      const bg = _bgStore.find(x => x.id === savedActive);
+      if (bg) {
+        bg.isActive = true;
+        if (savedOpacity) bg.opacity = parseInt(savedOpacity, 10);
+        _applyAvatarBg(bg);
+      }
+    }
+    _renderBgList();
+  } catch (e) {
+    console.warn('[BgStore] Lỗi khôi phục nền:', e);
+  }
+}
+
+function _applyAvatarBg(bg) {
+  const container = document.getElementById('avatar-canvas-container');
+  if (!container) return;
+  
+  let bgLayer = document.getElementById('av-bg-layer');
+  if (!bg) {
+    if (bgLayer) bgLayer.style.display = 'none';
+    localStorage.removeItem('av_bg_active_id');
+    return;
+  }
+  
+  if (!bgLayer) {
+    bgLayer = document.createElement('div');
+    bgLayer.id = 'av-bg-layer';
+    bgLayer.style.position = 'absolute';
+    bgLayer.style.inset = '0';
+    bgLayer.style.zIndex = '0'; // canvas has higher z-index hopefully
+    bgLayer.style.backgroundSize = 'cover';
+    bgLayer.style.backgroundPosition = 'center';
+    // Ensure canvas has transparent background and relative z-index
+    container.style.position = 'relative';
+    const canvas = container.querySelector('canvas');
+    if (canvas) {
+      canvas.style.position = 'relative';
+      canvas.style.zIndex = '1';
+    }
+    container.prepend(bgLayer);
+  }
+  
+  bgLayer.style.display = 'block';
+  bgLayer.style.backgroundImage = `url(${bg.objectUrl})`;
+  bgLayer.style.opacity = bg.opacity / 100;
+  
+  localStorage.setItem('av_bg_active_id', bg.id);
+  localStorage.setItem('av_bg_opacity', bg.opacity);
+}
+
+function _renderBgList() {
+  const listEl = document.getElementById('av-bg-list');
+  const dropzone = document.getElementById('av-bg-dropzone');
+  const countEl = document.getElementById('av-bg-count');
+  const activeWrap = document.getElementById('av-bg-active-wrap');
+  
+  if (!listEl) return;
+  countEl.textContent = _bgStore.length;
+  
+  const activeBg = _bgStore.find(x => x.isActive);
+  if (activeBg) {
+    activeWrap.style.display = 'block';
+    document.getElementById('av-bg-active-name').textContent = activeBg.name;
+    document.getElementById('av-bg-opacity').value = activeBg.opacity;
+    document.getElementById('av-bg-opacity-val').textContent = activeBg.opacity + '%';
+  } else {
+    activeWrap.style.display = 'none';
+  }
+  
+  if (_bgStore.length === 0) {
+    listEl.style.display = 'none';
+    dropzone.style.display = 'flex';
+  } else {
+    listEl.style.display = 'flex';
+    dropzone.style.display = 'none';
+    
+    let html = '';
+    _bgStore.forEach(bg => {
+      html += `
+        <div class="vrm-i${bg.isActive ? ' active' : ''}" style="display:flex;align-items:center;gap:10px;padding:6px;border-radius:8px;border:1px solid ${bg.isActive ? 'var(--pk)' : 'var(--bd-l)'};background:var(--bg-s);cursor:pointer" data-av-bg-use="${bg.id}">
+          <div style="width:40px;height:40px;border-radius:6px;overflow:hidden;flex-shrink:0;background:#000">
+            <img src="${bg.objectUrl}" style="width:100%;height:100%;object-fit:cover;opacity:${bg.opacity/100}"/>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${bg.name}</div>
+          </div>
+          <button class="bt bt-gh bt-sm" style="font-size:10px;padding:2px 6px;flex-shrink:0" data-av-bg-del="${bg.id}" onclick="event.stopPropagation()">Xóa</button>
+        </div>
+      `;
+    });
+    listEl.innerHTML = html;
+    
+    // Bind use
+    listEl.querySelectorAll('[data-av-bg-use]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.getAttribute('data-av-bg-use');
+        _bgStore.forEach(bg => bg.isActive = (bg.id === id));
+        const active = _bgStore.find(x => x.id === id);
+        if (active) _applyAvatarBg(active);
+        _renderBgList();
+      });
+    });
+    
+    // Bind del
+    listEl.querySelectorAll('[data-av-bg-del]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-av-bg-del');
+        const bg = _bgStore.find(x => x.id === id);
+        showConfirm(`Xóa nền "${bg?.name}"?`, async () => {
+          if (bg?.isActive) {
+            _applyAvatarBg(null);
+          }
+          const idx = _bgStore.findIndex(x => x.id === id);
+          if (idx !== -1) _bgStore.splice(idx, 1);
+          await _bgDB.saveAll(_bgStore).catch(err => console.warn(err));
+          showToast('Đã xóa nền', 'success');
+          _renderBgList();
+        });
+      });
+    });
+  }
+}
+
+async function _importBgFiles(files) {
+  if (!files.length) return;
+  let success = 0;
+  for (const file of files) {
+    try {
+      const buffer = await file.arrayBuffer();
+      const id = 'bg_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+      await _bgDB.save(id, file.name, buffer);
+      
+      const blob = new Blob([buffer]);
+      const objectUrl = URL.createObjectURL(blob);
+      
+      _bgStore.push({
+        id,
+        name: file.name,
+        fileName: file.name,
+        isActive: false,
+        opacity: 100,
+        objectUrl,
+        buffer
+      });
+      success++;
+    } catch (err) {
+      showToast(`❌ ${file.name}: Lỗi tải file`, 'error');
+    }
+  }
+  if (success > 0) {
+    showToast(`✅ Đã tải lên ${success} ảnh nền`, 'success');
+    _renderBgList();
+  }
+}
+
+function _openBgFilePicker() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*'; input.multiple = true;
+  input.onchange = async (e) => { await _importBgFiles(Array.from(e.target.files || [])); };
+  input.click();
+}
+
+let _avBgEventsBound = false;
+function _bindAvBgEvents() {
+  if (_avBgEventsBound) return;
+  _avBgEventsBound = true;
+  
+  document.getElementById('btn-av-bg-upload')?.addEventListener('click', _openBgFilePicker);
+  document.getElementById('btn-av-bg-remove')?.addEventListener('click', () => {
+    _bgStore.forEach(bg => bg.isActive = false);
+    _applyAvatarBg(null);
+    _renderBgList();
+  });
+  
+  const opacityInput = document.getElementById('av-bg-opacity');
+  if (opacityInput) {
+    opacityInput.addEventListener('input', (e) => {
+      const val = e.target.value;
+      document.getElementById('av-bg-opacity-val').textContent = val + '%';
+      const activeBg = _bgStore.find(x => x.isActive);
+      if (activeBg) {
+        activeBg.opacity = parseInt(val, 10);
+        _applyAvatarBg(activeBg);
+      }
+    });
+  }
+  
+  const dz = document.getElementById('av-bg-dropzone');
+  if (dz && !dz._dzBound) {
+    dz._dzBound = true;
+    dz.addEventListener('click', _openBgFilePicker);
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.style.borderColor = 'var(--pk)'; dz.style.background = 'var(--pk-bg)'; });
+    dz.addEventListener('dragleave', () => { dz.style.borderColor = ''; dz.style.background = ''; });
+    dz.addEventListener('drop', async e => {
+      e.preventDefault(); dz.style.borderColor = ''; dz.style.background = '';
+      const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+      if (!files.length) { showToast('Chỉ hỗ trợ file hình ảnh', 'error'); return; }
+      await _importBgFiles(files);
+    });
+  }
+}
+

@@ -11,35 +11,41 @@ export class GiftEngine extends EventEmitter {
     this.currentItem = null;
     this.progress = 0; // seconds elapsed on current item
     this.isRunning = false;
+    this.isPaused = false;
     this._timer = null;
   }
 
   start() {
     if (this.isRunning) return;
     this.isRunning = true;
+    this.isPaused = false;
     this._startTick();
-    this.emit('engineState', { running: true });
+    this.emit('engineState', { running: true, paused: false });
   }
 
   stop() {
     this.isRunning = false;
+    this.isPaused = false;
     if (this._timer) {
       clearInterval(this._timer);
       this._timer = null;
     }
-    this.emit('engineState', { running: false });
+    this.emit('engineState', { running: false, paused: false });
   }
 
   pause() {
+    if (!this.isRunning || this.isPaused) return;
     if (this._timer) {
       clearInterval(this._timer);
       this._timer = null;
     }
-    this.emit('engineState', { running: false, paused: true });
+    this.isPaused = true;
+    this.emit('engineState', { running: true, paused: true });
   }
 
   resume() {
-    if (!this.isRunning) return;
+    if (!this.isRunning || !this.isPaused) return;
+    this.isPaused = false;
     this._startTick();
     this.emit('engineState', { running: true, paused: false });
   }
@@ -186,6 +192,7 @@ export class GiftEngine extends EventEmitter {
       current: this.currentItem,
       progress: this.progress,
       isRunning: this.isRunning,
+      isPaused: this.isPaused,
     };
   }
 }
