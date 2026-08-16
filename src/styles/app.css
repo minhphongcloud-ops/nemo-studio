@@ -353,7 +353,9 @@ html.is-overlay.bg-transparent, html.is-overlay.bg-transparent body, html.is-ove
   background: transparent !important;
 }
 html.is-overlay .sb, 
+html.is-overlay .tb,
 html.is-overlay .stb, 
+html.is-overlay .dv,
 html.is-overlay .ws, 
 html.is-overlay .lp, 
 html.is-overlay .pn-h,

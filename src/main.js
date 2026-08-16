@@ -844,8 +844,11 @@ function render() {
   _bindAvBgEvents();
 
   // ── Restore WebGL canvas into correct slot after re-render ─
+  const isOverlay = new URLSearchParams(window.location.search).has('overlay');
   if (_savedCanvas) {
-    if (_currentNavIndex === 3) {
+    if (isOverlay) {
+      document.body.appendChild(_savedCanvas);
+    } else if (_currentNavIndex === 3) {
       const slot = document.getElementById('live-canvas-slot');
       if (slot) {
         // Remove any stale placeholder content
@@ -2170,7 +2173,15 @@ function initAvatarEngine() {
   if (!container) {
     container = document.createElement('div');
     container.id = 'avatar-canvas-container';
-    container.style.cssText = 'position:absolute;inset:0;overflow:hidden;background:linear-gradient(180deg,#1a0a2e 0%,#0d0618 40%,#080420 100%)';
+    let bgStyle = 'linear-gradient(180deg,#1a0a2e 0%,#0d0618 40%,#080420 100%)';
+    const urlParams = new URLSearchParams(window.location.search);
+    const isOverlay = urlParams.has('overlay');
+    if (isOverlay) {
+      const bgParam = urlParams.get('bg');
+      if (bgParam === 'green') bgStyle = '#00FF00';
+      else if (bgParam === 'transparent') bgStyle = 'transparent';
+    }
+    container.style.cssText = `position:absolute;inset:0;overflow:hidden;background:${bgStyle};z-index:9999;`;
     // Add empty-state overlay inside the container
     container.innerHTML = `
       <div id="avatar-empty-state" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:2;pointer-events:none">
@@ -2179,7 +2190,6 @@ function initAvatarEngine() {
         <span style="font-size:11px;color:var(--tm);opacity:0.4">Bấm "Import VRM" để bắt đầu</span>
       </div>`;
       
-    const isOverlay = new URLSearchParams(window.location.search).has('overlay');
     if (isOverlay) {
       document.body.appendChild(container);
     } else {
