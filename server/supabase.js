@@ -9,6 +9,11 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
   process.exit(1);
 }
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+import WebSocket from 'ws';
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: { persistSession: false },
+  realtime: { transport: WebSocket }
+});
 
 console.log('[Supabase] ✅ Đã kết nối:', SUPABASE_URL);
