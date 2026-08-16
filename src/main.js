@@ -1712,11 +1712,6 @@ function setupSocket() {
       minCoins: r.minCoins || 0
     }));
     _renderGiftRules();
-    
-    const tbody = document.getElementById('rules-body');
-    if (tbody) {
-      tbody.innerHTML = renderRules(rules);
-    }
   });
 
   socket.on('dances:updated', (dances) => {
