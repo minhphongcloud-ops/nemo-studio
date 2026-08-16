@@ -12,7 +12,7 @@ import { MockGiftProvider } from './gift/MockGiftProvider.js';
 // ══════════════════════════════════════════════════════════
 
 let liveSecs = 0;
-let _currentNavIndex = 3; // Track which nav tab is active (default: TikTok LIVE)
+let _currentNavIndex = parseInt(localStorage.getItem('nemo-nav-tab') ?? '3'); // Restore saved tab
 
 // ─── AVATAR ENGINE (singleton) ───────────────────────────
 const avatarEngine = new AvatarEngine();
@@ -837,6 +837,7 @@ function bindEvents() {
     el.classList.add('act');
     const navIndex = el.dataset.nav;
     _currentNavIndex = parseInt(navIndex);
+    localStorage.setItem('nemo-nav-tab', navIndex); // Persist active tab
     switchView(navIndex);
   }));
 
@@ -1480,6 +1481,12 @@ document.addEventListener('DOMContentLoaded', () => {
   } catch {}
 
   render();
+  // Restore active tab after render
+  const savedNav = localStorage.getItem('nemo-nav-tab') ?? '3';
+  switchView(savedNav);
+  document.querySelectorAll('[data-nav]').forEach(el => {
+    el.classList.toggle('act', el.dataset.nav === savedNav);
+  });
   setupSocket();
   startTimers();
   initAvatarEngine();
