@@ -37,18 +37,30 @@ const giftEngine = new GiftEngine();
 
 // Accounts
 app.get('/api/accounts', async (_, res) => res.json(await store.getAccounts()));
-app.post('/api/accounts', async (req, res) => res.json(await store.addAccount(req.body)));
+app.post('/api/accounts', async (req, res) => {
+  const account = await store.addAccount(req.body);
+  io.emit('accounts:updated', await store.getAccounts());
+  res.json(account);
+});
 app.put('/api/accounts/:id', async (req, res) => {
   const result = await store.updateAccount(req.params.id, req.body);
-  result ? res.json(result) : res.status(404).json({ error: 'Không tìm thấy' });
+  if (result) {
+    io.emit('accounts:updated', await store.getAccounts());
+    res.json(result);
+  } else {
+    res.status(404).json({ error: 'Không tìm thấy' });
+  }
 });
 app.delete('/api/accounts/:id', async (req, res) => {
   tiktok.disconnect(req.params.id);
   await store.deleteAccount(req.params.id);
+  io.emit('accounts:updated', await store.getAccounts());
   res.json({ ok: true });
 });
 app.post('/api/accounts/:id/select', async (req, res) => {
-  res.json(await store.selectAccount(req.params.id));
+  const result = await store.selectAccount(req.params.id);
+  io.emit('accounts:updated', await store.getAccounts());
+  res.json(result);
 });
 
 // Rules

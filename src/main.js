@@ -527,7 +527,10 @@ function render() {
           <div style="flex:1.2;display:flex;flex-direction:column;min-width:0">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:0 4px">
               <span style="font-size:12px;font-weight:600;color:var(--t1);text-transform:uppercase;letter-spacing:0.04em">AVATAR PREVIEW</span>
-              <div style="display:flex;align-items:center;gap:6px"><span class="sd sd-ok"></span><span style="font-size:11px;color:var(--ok);font-weight:600">${!engine.isRunning ? 'Stopped' : engine.isPaused ? 'Paused' : 'Live'}</span></div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <button class="bt bt-sc bt-sm" id="btn-copy-overlay" style="padding:2px 8px;font-size:10px" title="Mở cửa sổ Overlay (Phông xanh) để quay trên OBS/Live Studio">🟩 Mở Cửa Sổ Overlay</button>
+                <span class="sd sd-ok"></span><span style="font-size:11px;color:var(--ok);font-weight:600">${!engine.isRunning ? 'Stopped' : engine.isPaused ? 'Paused' : 'Live'}</span>
+              </div>
             </div>
             <div class="avd" id="avatar-display" style="flex:1">
               <!-- Real WebGL canvas moved here by switchView() -->
@@ -600,28 +603,11 @@ function render() {
           </div>
           <div class="pn-f" style="padding:6px 12px"><span style="font-size:10px;color:var(--tm)">↕ Kéo thả để thay đổi thứ tự ưu tiên</span></div>
         </div>
-
-        <!-- GIFT QUEUE -->
-        <div class="pn" style="height:100%">
-          <div class="pn-h"><span class="pn-t">HÀNG ĐỢI QUÀ TẶNG</span><div class="pn-a"><button class="bt bt-gh bt-sm" id="btn-clear-queue">Xóa hàng đợi</button></div></div>
-          <div class="pn-b" id="queue-body" style="padding:8px">${renderQueue(engine)}</div>
-          <div class="qc" id="queue-current">${renderQueueCurrent(engine)}</div>
-        </div>
-
-        <!-- DANCE LIBRARY -->
-        <div class="pn" style="height:100%">
-          <div class="pn-h"><span class="pn-t">THƯ VIỆN NHẢY</span><div class="pn-a"><button class="bt bt-sc bt-sm" id="btn-add-dance">+ Thêm</button></div></div>
-          <div class="pn-b pn-b0" style="padding-top:10px">
-            <div class="dt" id="dance-tabs">${renderDanceTabs(danceTab)}</div>
-            <div class="dg" id="dance-grid">${renderDanceCards(dances, danceTab, settings.selectedDanceId)}</div>
-            <div style="padding:10px 12px"><button class="bt-add" id="btn-add-dance2">+ Thêm chuyển động</button></div>
-          </div>
-        </div>
       </div>
       </div><!-- /view-live -->
 
       <!-- ══════ VIEW: AVATAR STUDIO (index 2) ══════ -->
-      <div id="view-avatar-studio" class="view-page" style="display:${_currentNavIndex === 1 ? 'block' : 'none'}">
+      <div id="view-avatar-studio" class="view-page" style="display:${_currentNavIndex === 1 ? 'flex' : 'none'}">
         <div style="display:grid;grid-template-columns:7fr 5fr;gap:14px;height:100%">
 
           <!-- LEFT: 3D AVATAR PREVIEW -->
@@ -1034,6 +1020,7 @@ function _renderGiftRules() {
       <td>
         <div style="display:flex;align-items:center;gap:6px">
           <div class="tg${r.active ? ' on' : ''}" data-toggle-rule="${r.id}" title="${r.active ? 'Tắt' : 'Bật'}" style="cursor:pointer"></div>
+          <button class="bt bt-pk bt-sm" style="height:24px;padding:0 8px;font-size:10px" data-test-rule="${r.id}" title="Test thử">▶ Test</button>
           <button class="bt bt-sc bt-sm" style="height:24px;padding:0 8px;font-size:10px" data-edit-rule="${r.id}" title="Sửa">✎</button>
           <button class="bt bt-gh bt-sm" style="height:24px;padding:0 8px;font-size:10px" data-del-rule="${r.id}" title="Xóa">🗑</button>
         </div>
@@ -1061,6 +1048,28 @@ function _renderGiftRules() {
     const id = el.getAttribute('data-edit-rule');
     const r  = _giftRules.find(x => x.id === id);
     if (r) _showAddRuleModal(r);
+  }));
+  // Bind test
+  container.querySelectorAll('[data-test-rule]').forEach(el => el.addEventListener('click', () => {
+    if (!mockGiftProvider) {
+      showToast('⚠️ Hệ thống quà tặng chưa sẵn sàng', 'error');
+      return;
+    }
+    const id = el.getAttribute('data-test-rule');
+    const r  = _giftRules.find(x => x.id === id);
+    if (r) {
+      if (!r.active) {
+        showToast('⚠️ Quy tắc này đang bị tắt', 'error');
+        return;
+      }
+      mockGiftProvider.sendTestGift({
+        giftId: Date.now(),
+        giftName: r.giftName,
+        quantity: r.minQty,
+        userName: 'Nemo Test'
+      });
+      showToast(`▶ Đang test quà: ${r.giftName}`, 'success');
+    }
   }));
 }
 
@@ -1250,45 +1259,27 @@ function bindEvents() {
           showToast('⚠️ Tài khoản này đã tồn tại', 'error'); return false;
         }
         const newAcc = {
-          id:          Date.now().toString(),
           username,
           displayName: (data.displayName || '').trim() || username,
           avatarEmoji: (data.avatarEmoji || '👤').trim(),
-          avatarColor: colors[accounts.length % colors.length],
-          status:      'offline',
-          isConnected: false,
-          selected:    !accounts.length, // auto-select if first account
-          followers:   '0',
-          viewers:     '0',
-          likes:       '0',
+          avatarColor: colors[accounts.length % colors.length]
         };
-        const updated = [...accounts, newAcc];
-        state.set('accounts', updated);
-        _saveAccounts();
-        render();
-        showToast(`✅ Đã thêm @${username}`, 'success');
+        api.addAccount(newAcc).then(() => {
+          showToast(`✅ Đã thêm @${username}`, 'success');
+        }).catch(err => showToast('Lỗi: ' + err.message, 'error'));
       },
     });
   }
 
   function _selectAccount(id) {
-    const accounts = state.get('accounts').map(a => ({ ...a, selected: a.id === id }));
-    state.set('accounts', accounts);
-    _saveAccounts();
-    render();
+    api.selectAccount(id).catch(err => showToast('Lỗi: ' + err.message, 'error'));
   }
 
   function _deleteAccount(id) {
     showConfirm('Bạn có chắc muốn xóa tài khoản này?', () => {
-      let accounts = state.get('accounts').filter(a => a.id !== id);
-      // If deleted was selected, select first remaining
-      if (accounts.length && !accounts.find(a => a.selected)) {
-        accounts[0].selected = true;
-      }
-      state.set('accounts', accounts);
-      _saveAccounts();
-      render();
-      showToast('Đã xóa tài khoản', 'success');
+      api.deleteAccount(id).then(() => {
+        showToast('Đã xóa tài khoản', 'success');
+      }).catch(err => showToast('Lỗi: ' + err.message, 'error'));
     });
   }
 
@@ -1377,10 +1368,26 @@ function bindEvents() {
   document.getElementById('btn-engine-reset')?.addEventListener('click', () => { if (socket?.connected) socket.emit('engine:reset'); });
 
   // Settings toggles
+  // Settings toggles
   document.querySelectorAll('[data-setting]').forEach(el => el.addEventListener('click', () => {
     el.classList.toggle('on');
     const key = el.dataset.setting;
-    socket.emit('settings:update', { [key]: el.classList.contains('on') });
+    const val = el.classList.contains('on');
+    socket.emit('settings:update', { [key]: val });
+    
+    // Immediate Auto Dance trigger if toggled ON and avatar is currently IDLE
+    if (key === 'autoDance') {
+      if (val && avatarEngine?.stateMachine?.state === 'IDLE') {
+        const anims = avatarEngine.animationRegistry.getAll();
+        if (anims.length > 0) {
+          avatarEngine.setLoop(true);
+          avatarEngine.playAnimation(anims[0].id);
+        }
+      } else if (!val) {
+        // Stop the loop so it can finish or stop immediately
+        if (avatarEngine) avatarEngine.setLoop(false);
+      }
+    }
   }));
   document.querySelector('[data-setting-vol]')?.addEventListener('input', (e) => {
     const v = e.target.value;
@@ -1517,6 +1524,30 @@ function bindEvents() {
   document.getElementById('btn-av-pause')?.addEventListener('click', () => avatarEngine.pauseAnimation());
   document.getElementById('btn-av-stop')?.addEventListener('click', () => avatarEngine.stopAnimation());
   document.getElementById('btn-av-reset')?.addEventListener('click', () => avatarEngine.resetAnimation());
+  
+  // Open Overlay Window button
+  document.getElementById('btn-copy-overlay')?.addEventListener('click', () => {
+    try {
+      const url = new URL(window.location.href);
+      url.pathname = '/';
+      url.searchParams.set('overlay', '1');
+      
+      const activeVrm = typeof _vrmStore !== 'undefined' ? _vrmStore.find(v => v.isActive) : null;
+      if (activeVrm) url.searchParams.set('vrmId', activeVrm.id);
+      url.searchParams.set('bg', 'green');
+      url.searchParams.set('fps', '30');
+      url.searchParams.set('obs', '1');
+
+      window.open(url.href, 'AvatarOverlay', 'width=600,height=900,menubar=no,toolbar=no,location=no,status=no');
+      
+      // Try to write to clipboard
+      navigator.clipboard.writeText(url.href).catch(() => {});
+      
+      showToast('Đã copy link & mở cửa sổ Overlay!', 'success');
+    } catch (e) {
+      showToast('Không thể mở cửa sổ', 'error');
+    }
+  });
 
   // Speed buttons
   document.querySelectorAll('[data-speed]').forEach(el => el.addEventListener('click', () => {
@@ -1583,7 +1614,14 @@ function updateGiftFeed() {
 
 function updateDancePanel() {
   const tab = state.get('danceTab');
-  const dances = state.get('dances');
+  const animations = avatarEngine ? avatarEngine.animationRegistry.getAll() : [];
+  const dances = animations.map(a => ({
+    id: a.id,
+    name: a.name,
+    category: a.category || 'animation',
+    duration: fmtTime(a.durationSec || 0),
+    emoji: a.category === 'dance' ? '💃' : (a.category === 'special' ? '✨' : '🎭')
+  }));
   const settings = state.get('settings');
   const tabsEl = document.getElementById('dance-tabs');
   const gridEl = document.getElementById('dance-grid');
@@ -1599,9 +1637,9 @@ function updateDancePanel() {
     socket.emit('settings:update', { selectedDanceId: el.dataset.danceId });
   }));
   document.querySelectorAll('[data-del-dance]').forEach(el => el.addEventListener('click', (e) => {
-    e.stopPropagation();
-    showConfirm('Xóa chuyển động này?', async () => {
-      await api.deleteDance(el.dataset.delDance);
+    const danceId = el.dataset.delDance;
+    showConfirm('Xóa animation này?', () => {
+      if (avatarEngine) avatarEngine.animationRegistry.remove(danceId);
       showToast('Đã xóa', 'success');
     });
   }));
@@ -1651,13 +1689,13 @@ function setupSocket() {
       document.querySelectorAll('[data-edit-rule]').forEach(el => el.addEventListener('click', () => {
         const rule = state.get('rules').find(r => r.id === el.dataset.editRule);
         if (!rule) return;
-        const dances = state.get('dances');
+        const anims = avatarEngine ? avatarEngine.animationRegistry.getAll() : [];
         showModal({
           title: 'Sửa quy tắc',
           fields: [
             { key: 'giftName', label: 'Tên quà tặng', value: rule.giftName, type: 'text' },
             { key: 'giftEmoji', label: 'Emoji', value: rule.giftEmoji, type: 'text' },
-            { key: 'action', label: 'Hành động', type: 'select', value: rule.action, options: dances.map(d => ({ value: d.name, label: `${d.emoji} ${d.name}` })) },
+            { key: 'action', label: 'Hành động', type: 'select', value: rule.action, options: anims.map(a => ({ value: a.id, label: `${a.category === 'dance' ? '💃' : (a.category === 'special' ? '✨' : '🎭')} ${a.name}` })) },
             { key: 'durationSec', label: 'Thời gian (giây)', value: String(rule.durationSec), type: 'number' },
             { key: 'priority', label: 'Ưu tiên (1-20)', value: String(rule.priority), type: 'number' },
           ],
@@ -1713,6 +1751,15 @@ function setupSocket() {
     state.set('engine.progress', 0);
     updateAvatar();
     updateQueue();
+    
+    // Play the animation on the avatar engine
+    if (avatarEngine && data.item && data.item.action) {
+      avatarEngine.setLoop(false);
+      avatarEngine.executeCommand({
+        type: 'PLAY_ANIMATION',
+        animationId: data.item.action
+      });
+    }
   });
 
   socket.on('engine:animationUpdate', (data) => {
@@ -1787,6 +1834,16 @@ const _NAV_META = [
 function _moveCanvasToSlot(slotId) {
   const canvas = document.getElementById('avatar-canvas-container');
   const slot   = document.getElementById(slotId);
+  
+  const isOverlay = new URLSearchParams(window.location.search).has('overlay');
+  if (isOverlay) {
+    if (canvas && canvas.parentElement !== document.body) {
+      document.body.appendChild(canvas);
+      avatarEngine.runtime?.resize?.();
+    }
+    return;
+  }
+  
   if (canvas && slot && slot !== canvas.parentElement) {
     slot.appendChild(canvas);
     // Restore full size
@@ -1809,7 +1866,7 @@ function switchView(navIndex) {
   [viewLive, viewAvatar, viewComingSoon, viewUsers].forEach(v => { if (v) v.style.display = 'none'; });
 
   if (navIndex === '1') {
-    if (viewAvatar) viewAvatar.style.display = 'block';
+    if (viewAvatar) viewAvatar.style.display = '';
     setTimeout(() => {
       _moveCanvasToSlot('av-studio-canvas-slot');
       refreshAvLib();
@@ -1993,22 +2050,31 @@ function _bootApp() {
     if (savedAccounts.length) state.set('accounts', savedAccounts);
   } catch {}
 
-  // Restore saved nav tab
-  try {
-    const saved = localStorage.getItem('nemo-nav-tab');
-    if (saved !== null) _currentNavIndex = parseInt(saved) || 0;
-  } catch (_) {}
+  const urlParams = new URLSearchParams(window.location.search);
+  const isOverlay = urlParams.has('overlay');
+
+  if (!isOverlay) {
+    // Determine initial view: URL path > localStorage > default (Dashboard)
+    const urlNav = _getNavFromUrl();
+    if (urlNav !== null) {
+      _currentNavIndex = urlNav;
+    } else {
+      try {
+        const saved = localStorage.getItem('nemo-nav-tab');
+        if (saved !== null) _currentNavIndex = parseInt(saved) || 0;
+      } catch (_) {}
+    }
+  }
 
   render();
   setupSocket();
   startTimers();
   initAvatarEngine();
 
-  // Determine initial view: URL path > localStorage > default (Dashboard)
-  const urlNav = _getNavFromUrl();
-  if (urlNav !== null) _currentNavIndex = urlNav;
   const savedNav = String(_currentNavIndex);
-  _syncUrlToNav(_currentNavIndex, true);
+  if (!isOverlay) {
+    _syncUrlToNav(_currentNavIndex, true);
+  }
   switchView(savedNav);
   document.querySelectorAll('[data-nav]').forEach(el => {
     el.classList.toggle('act', el.dataset.nav === savedNav);
@@ -2036,8 +2102,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const isRoot = location.pathname === '/' || location.pathname === '';
 
-  // Check auth
-  if (_isLoggedIn()) {
+  // Check auth and Overlay mode
+  const urlParams = new URLSearchParams(window.location.search);
+  const isOverlay = urlParams.has('overlay');
+
+  if (isOverlay) {
+    document.documentElement.classList.add('is-overlay');
+    const bgParam = urlParams.get('bg') || 'green';
+    document.documentElement.classList.add(`bg-${bgParam}`);
+    
+    // Disable interaction if obs mode
+    if (urlParams.get('obs') === '1') {
+      document.body.style.pointerEvents = 'none';
+      document.documentElement.style.overflow = 'hidden';
+    }
+
+    _currentNavIndex = 1; // Force Avatar Studio view
+    _bootApp();
+    
+    // Mini LIVE Composer Widgets
+    const isObs = urlParams.get('obs') === '1';
+    _initMiniLiveComposer(isObs);
+    
+    // Set FPS limit if provided
+    const fpsLimit = parseInt(urlParams.get('fps'), 10);
+    if (!isNaN(fpsLimit) && fpsLimit > 0) {
+       // Assuming avatarEngine supports setting target FPS, although we might not have a direct setter.
+       // The parameter is at least parsed for future use.
+    }
+    
+  } else if (_isLoggedIn()) {
     // If logged in at root, redirect to dashboard
     if (isRoot) {
       _currentNavIndex = 0;
@@ -2076,8 +2170,14 @@ function initAvatarEngine() {
         <span style="font-size:13px;color:var(--tm);opacity:0.6" id="avatar-empty-label">Chưa có Avatar</span>
         <span style="font-size:11px;color:var(--tm);opacity:0.4">Bấm "Import VRM" để bắt đầu</span>
       </div>`;
-    const slot = document.getElementById('av-studio-canvas-slot');
-    if (slot) slot.appendChild(container);
+      
+    const isOverlay = new URLSearchParams(window.location.search).has('overlay');
+    if (isOverlay) {
+      document.body.appendChild(container);
+    } else {
+      const slot = document.getElementById('av-studio-canvas-slot');
+      if (slot) slot.appendChild(container);
+    }
   }
 
   // Init engine
@@ -2121,6 +2221,18 @@ function initAvatarEngine() {
     }
     // Also keep _syncAvatarEmptyState in sync for future render() calls
     _syncAvatarEmptyState();
+
+    // Auto Dance logic: Loop first available animation when idle
+    if (newState === 'IDLE') {
+      const settings = state.get('settings') || {};
+      if (settings.autoDance) {
+        const anims = avatarEngine.animationRegistry.getAll();
+        if (anims.length > 0) {
+          avatarEngine.setLoop(true);
+          avatarEngine.playAnimation(anims[0].id);
+        }
+      }
+    }
   });
 
   // Animation events
@@ -2172,10 +2284,17 @@ function initAvatarEngine() {
       type: 'rule_matched',
       message: `Rule matched: ${result.rule.giftName} → ${result.rule.action}`,
     });
+    
+    // Trigger Mini LIVE Composer Banner
+    if (typeof _triggerComposerBanner === 'function') {
+      const g = result.giftEvent || {};
+      _triggerComposerBanner(g.giftName || result.rule.giftName, result.rule.giftEmoji || '🎁', g.quantity || 1, g.userName || 'Tiktok User');
+    }
   });
 
   // Update VRMA dance list when animations change
   avatarEngine.animationRegistry.onChange((animations) => {
+    updateDancePanel(); // Sync with TikTok LIVE screen
     // Update Avatar Studio VRMA list panel
     const listEl = document.getElementById('vrma-dance-list');
     if (listEl) {
@@ -2696,8 +2815,22 @@ async function _initVrmStore() {
     _vrmStore.push(...saved);
     _refreshAllVrmUIs();
 
+    // Parse URL params for specific VRM load (Overlay Mode)
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlVrmId = urlParams.get('vrmId');
+    let active = null;
+    
+    if (urlVrmId) {
+      active = saved.find(v => v.id === urlVrmId);
+      if (active) {
+        _vrmStore.forEach(v => v.isActive = (v.id === active.id));
+      }
+    }
+    
     // Restore active avatar into engine
-    const active = saved.find(v => v.isActive);
+    if (!active) {
+      active = saved.find(v => v.isActive);
+    }
     if (active?._buffer) {
       // Validate buffer is not empty/detached
       const byteLen = active._buffer.byteLength ?? 0;

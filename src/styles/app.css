@@ -111,7 +111,8 @@ ul,ol{list-style:none}table{border-collapse:collapse;border-spacing:0}
 .ct{flex:1;overflow-y:auto;overflow-x:hidden;padding:12px;display:flex;flex-direction:column;gap:12px}
 .view-page{display:flex;flex-direction:column;gap:12px;flex:1;min-height:0}
 .ws{display:grid;grid-template-columns:2fr 6fr 4fr;gap:14px;min-height:360px}
-.lp{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;min-height:260px}
+.lp{display:block;min-height:260px}
+.lp .pn{margin-bottom:14px}
 
 /* STATUS BAR */
 .stb{height:40px;min-height:40px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:var(--bg-sb);border-top:1px solid var(--bd-l);z-index:100;gap:16px}
@@ -336,6 +337,128 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
 .a-gh{animation:gh 0.8s ease}
 
 /* RESPONSIVE */
-@media(max-width:1600px){.ws{grid-template-columns:2fr 6fr 4fr}.lp{grid-template-columns:1fr 1fr 1fr}}
-@media(max-width:1440px){.ws{grid-template-columns:2fr 6fr 4fr}.lp{grid-template-columns:1fr 1fr 1fr}}
-@media(max-width:1280px){.ws{grid-template-columns:2fr 5fr 4fr}.ct{padding:8px;gap:8px}.ws,.lp{gap:8px}.lp{grid-template-columns:1fr 1fr 1fr}}
+@media(max-width:1600px){.ws{grid-template-columns:2fr 6fr 4fr}}
+@media(max-width:1440px){.ws{grid-template-columns:2fr 6fr 4fr}}
+@media(max-width:1280px){.ws{grid-template-columns:2fr 5fr 4fr}.ct{padding:8px;gap:8px}.ws{gap:8px}}
+
+
+/* OVERLAY MODE FOR OBS/LIVE STUDIO */
+html.is-overlay, html.is-overlay body {
+  overflow: hidden !important;
+}
+html.is-overlay.bg-green, html.is-overlay.bg-green body, html.is-overlay.bg-green #avatar-canvas-container {
+  background: #00FF00 !important;
+}
+html.is-overlay.bg-transparent, html.is-overlay.bg-transparent body, html.is-overlay.bg-transparent #avatar-canvas-container {
+  background: transparent !important;
+}
+html.is-overlay .sb, 
+html.is-overlay .stb, 
+html.is-overlay .ws, 
+html.is-overlay .lp, 
+html.is-overlay .pn-h,
+html.is-overlay #view-dashboard,
+html.is-overlay #view-wallet,
+html.is-overlay #view-live,
+html.is-overlay #view-settings,
+html.is-overlay #view-users,
+html.is-overlay #avatar-empty-state,
+html.is-overlay .view-page > div:not(#avatar-canvas-container) {
+  display: none !important;
+}
+html.is-overlay #view-avatar-studio {
+  display: block !important;
+  height: 100vh !important;
+  width: 100vw !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+html.is-overlay #avatar-canvas-container {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 9999 !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+/* MINI LIVE COMPOSER WIDGETS */
+.composer-widget {
+  position: absolute;
+  color: #FFF;
+  font-family: inherit;
+  user-select: none;
+}
+.composer-widget.edit-mode {
+  cursor: grab;
+  outline: 2px dashed rgba(255, 255, 255, 0.4);
+  outline-offset: 4px;
+}
+.composer-widget.edit-mode:hover {
+  outline-color: var(--pk);
+}
+.composer-widget.dragging {
+  cursor: grabbing !important;
+  opacity: 0.8;
+}
+
+.composer-banner-inner {
+  background: rgba(20, 20, 20, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+.composer-banner-inner .banner-icon {
+  font-size: 18px;
+}
+
+#composer-menu {
+  background: rgba(20, 20, 20, 0.65);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  width: 240px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.composer-menu-header {
+  padding: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pk);
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.composer-menu-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.composer-menu-item {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.composer-menu-item .emoji {
+  font-size: 16px;
+}
+html.is-overlay #av-bg-layer {
+  display: none !important; /* Force transparent background in overlay mode */
+}
+
