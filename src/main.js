@@ -831,6 +831,7 @@ function render() {
   _libPageEventsBound = false;
   _vrmLibEventsBound = false;
   _avStudioVrmEventsBound = false;
+  _avBgEventsBound = false;
 
   bindEvents();
   _bindThemeToggle();
