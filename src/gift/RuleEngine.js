@@ -46,7 +46,7 @@ export class RuleEngine {
     }
 
     // Map rule action to animation ID in registry
-    const actionName = matchedRule.action;
+    const actionName = matchedRule.action || matchedRule.animationName;
     const animation = this._registry.findByName(actionName);
 
     const command = createPlayCommand(

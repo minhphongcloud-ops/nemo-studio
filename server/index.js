@@ -191,21 +191,21 @@ io.on('connection', async (socket) => {
   socket.on('queue:clear', () => giftEngine.clearQueue());
 
   // ── DevTools: Simulate Gift ──
-  socket.on('devtools:gift', (data) => {
+  socket.on('devtools:gift', async (data) => {
     console.log(`[DevTools] Simulated gift: ${data.giftName} x${data.quantity}`);
     const giftEvent = {
-      accountId:    'devtools',
-      userId:       'dev_' + Date.now(),
-      uniqueId:     data.username || 'DevUser',
-      nickname:     data.username || 'Người dùng thử',
-      giftName:     data.giftName,
-      repeatCount:  data.quantity || 1,
-      diamondCount: 0,
-      timestamp:    Date.now(),
+      giftId: Date.now().toString(),
+      giftName: data.giftName,
+      repeatCount: data.quantity,
+      nickname: data.username || 'DevUser',
+      uniqueId: data.username || 'devuser',
+      userId: 'dev_' + Date.now(),
+      profilePictureUrl: '',
+      timestamp: Date.now()
     };
     io.emit('tiktok:gift', giftEvent);
-    const result = giftEngine.processGift(giftEvent);
-    if (result.matched) {
+    const result = await giftEngine.processGift(giftEvent);
+    if (result && result.matched) {
       io.emit('gift:matched', { rule: result.rule, queueItem: result.queueItem });
     }
   });
@@ -239,10 +239,10 @@ io.on('connection', async (socket) => {
 // ─── TikTok Events → Socket.IO ──────────────────────────
 tiktok.on('connected', (data) => io.emit('tiktok:connected', data));
 
-tiktok.on('gift', (data) => {
+tiktok.on('gift', async (data) => {
   io.emit('tiktok:gift', data);
-  const result = giftEngine.processGift(data);
-  if (result.matched) {
+  const result = await giftEngine.processGift(data);
+  if (result && result.matched) {
     io.emit('gift:matched', { rule: result.rule, queueItem: result.queueItem });
   }
 });

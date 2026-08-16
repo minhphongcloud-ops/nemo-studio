@@ -62,11 +62,11 @@ export class GiftEngine extends EventEmitter {
   /**
    * Process an incoming gift event — match rules, add to queue.
    */
-  processGift(giftEvent) {
-    const settings = store.getSettings();
-    if (!settings.receiveGifts) return;
+  async processGift(giftEvent) {
+    const settings = await store.getSettings();
+    if (!settings.receiveGifts) return { matched: false };
 
-    const rules = store.getRules();
+    const rules = await store.getRules();
 
     // Find matching rule (case-insensitive partial match on gift name)
     const giftNameLower = (giftEvent.giftName || '').toLowerCase();

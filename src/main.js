@@ -1029,18 +1029,28 @@ function _renderGiftRules() {
   }).join('');
 
   // Bind toggle
-  container.querySelectorAll('[data-toggle-rule]').forEach(el => el.addEventListener('click', () => {
-    const r = _giftRules.find(x => x.id === el.getAttribute('data-toggle-rule'));
-    if (r) { r.active = !r.active; _saveGiftRules(); _renderGiftRules(); }
+  container.querySelectorAll('[data-toggle-rule]').forEach(el => el.addEventListener('click', async () => {
+    const id = el.getAttribute('data-toggle-rule');
+    const r = _giftRules.find(x => x.id === id);
+    if (r) {
+      try {
+        await api.updateRule(id, { active: !r.active });
+      } catch (err) {
+        showToast('Lỗi: ' + err.message, 'error');
+      }
+    }
   }));
   // Bind delete
   container.querySelectorAll('[data-del-rule]').forEach(el => el.addEventListener('click', () => {
     const id = el.getAttribute('data-del-rule');
     const r = _giftRules.find(x => x.id === id);
-    showConfirm(`Xóa quy tắc "${r?.giftEmoji} ${r?.giftName}"?`, () => {
-      _giftRules = _giftRules.filter(x => x.id !== id);
-      _saveGiftRules(); _renderGiftRules();
-      showToast('Đã xóa quy tắc', 'success');
+    showConfirm(`Xóa quy tắc "${r?.giftEmoji} ${r?.giftName}"?`, async () => {
+      try {
+        await api.deleteRule(id);
+        showToast('Đã xóa quy tắc', 'success');
+      } catch (err) {
+        showToast('Lỗi: ' + err.message, 'error');
+      }
     });
   }));
   // Bind edit
@@ -1143,7 +1153,7 @@ function _showAddRuleModal(editRule = null) {
     title: isEdit ? `✎ Sửa quy tắc: ${editRule.giftEmoji} ${editRule.giftName}` : '+ Thêm Quy Tắc Kích Hoạt Quà',
     customContent: modalContent,
     submitLabel: isEdit ? 'Lưu thay đổi' : 'Thêm quy tắc',
-    onSubmit: () => {
+    onSubmit: async () => {
       const giftName  = document.getElementById('rule-gift-name')?.value;
       const giftEmoji = document.getElementById('rule-gift-emoji')?.value;
       const minCoins  = parseInt(document.getElementById('rule-gift-coins')?.value) || 0;
@@ -1154,19 +1164,26 @@ function _showAddRuleModal(editRule = null) {
       if (!giftName) { showToast('⚠️ Chưa chọn quà!', 'error'); return false; }
       if (!animName) { showToast('⚠️ Chưa chọn animation!', 'error'); return false; }
 
-      if (isEdit) {
-        const r = _giftRules.find(x => x.id === editRule.id);
-        if (r) { r.giftName = giftName; r.giftEmoji = giftEmoji; r.minCoins = minCoins; r.animationName = animName; r.minQty = minQty; r.durationSec = duration || 0; }
-      } else {
-        _giftRules.push({
-          id: 'rule_' + Date.now().toString(36),
-          giftName, giftEmoji, minCoins, animationName: animName,
-          minQty, durationSec: duration || 0, active: true
-        });
+      const ruleData = {
+        giftName,
+        giftEmoji,
+        action: animName,
+        priority: minQty,
+        durationSec: duration,
+        minCoins // Only for UI, but safe to send
+      };
+
+      try {
+        if (isEdit) {
+          await api.updateRule(editRule.id, ruleData);
+          showToast(`✅ Đã cập nhật quy tắc "${giftEmoji} ${giftName}"`, 'success');
+        } else {
+          await api.addRule(ruleData);
+          showToast(`✅ Đã thêm quy tắc "${giftEmoji} ${giftName}"`, 'success');
+        }
+      } catch (err) {
+        showToast(`❌ Lỗi: ${err.message}`, 'error');
       }
-      _saveGiftRules();
-      _renderGiftRules();
-      showToast(`✅ ${isEdit ? 'Đã cập nhật' : 'Đã thêm'} quy tắc "${giftEmoji} ${giftName}"`, 'success');
     }
   });
 
@@ -1678,33 +1695,23 @@ function setupSocket() {
 
   socket.on('rules:updated', (rules) => {
     state.set('rules', rules);
+    
+    // Sync UI rules array with server
+    _giftRules = rules.map(r => ({
+      id: r.id, 
+      giftName: r.giftName, 
+      giftEmoji: r.giftEmoji,
+      animationName: r.action, 
+      durationSec: r.durationSec,
+      minQty: r.priority, 
+      active: r.active, 
+      minCoins: r.minCoins || 0
+    }));
+    _renderGiftRules();
+    
     const tbody = document.getElementById('rules-body');
     if (tbody) {
       tbody.innerHTML = renderRules(rules);
-      // Rebind rule events
-      document.querySelectorAll('[data-toggle-rule]').forEach(el => el.addEventListener('click', async () => {
-        el.classList.toggle('on');
-        await api.updateRule(el.dataset.toggleRule, { active: el.classList.contains('on') });
-      }));
-      document.querySelectorAll('[data-edit-rule]').forEach(el => el.addEventListener('click', () => {
-        const rule = state.get('rules').find(r => r.id === el.dataset.editRule);
-        if (!rule) return;
-        const anims = avatarEngine ? avatarEngine.animationRegistry.getAll() : [];
-        showModal({
-          title: 'Sửa quy tắc',
-          fields: [
-            { key: 'giftName', label: 'Tên quà tặng', value: rule.giftName, type: 'text' },
-            { key: 'giftEmoji', label: 'Emoji', value: rule.giftEmoji, type: 'text' },
-            { key: 'action', label: 'Hành động', type: 'select', value: rule.action, options: anims.map(a => ({ value: a.id, label: `${a.category === 'dance' ? '💃' : (a.category === 'special' ? '✨' : '🎭')} ${a.name}` })) },
-            { key: 'durationSec', label: 'Thời gian (giây)', value: String(rule.durationSec), type: 'number' },
-            { key: 'priority', label: 'Ưu tiên (1-20)', value: String(rule.priority), type: 'number' },
-          ],
-          onSubmit: async (data) => { await api.updateRule(rule.id, data); showToast('Đã cập nhật', 'success'); },
-        });
-      }));
-      document.querySelectorAll('[data-del-rule]').forEach(el => el.addEventListener('click', () => {
-        showConfirm('Xóa quy tắc này?', async () => { await api.deleteRule(el.dataset.delRule); showToast('Đã xóa', 'success'); });
-      }));
     }
   });
 

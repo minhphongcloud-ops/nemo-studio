@@ -57,9 +57,10 @@ export class MockGiftProvider {
     const result = this._ruleEngine.match(giftEvent);
 
     if (result) {
-      this._log('rule_matched', `Rule matched: ${result.rule.action}`);
+      this._log('rule_matched', `Rule matched: ${result.rule.action || result.rule.animationName}`);
 
       // 3. Send AvatarCommand to AvatarEngine
+      this._avatarEngine.setLoop(false);
       this._avatarEngine.executeCommand(result.command);
     } else {
       this._log('rule_no_match', `No rule matched for: ${giftName}`);
