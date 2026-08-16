@@ -1,0 +1,279 @@
+/* ==============================
+   Global Styles
+   ============================== */
+
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-regular);
+  color: var(--text-primary);
+  background: var(--bg-app);
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Typography Utilities ── */
+
+.text-title {
+  font-size: var(--font-size-page-title);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.text-section {
+  font-size: var(--font-size-section-title);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.text-body {
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+}
+
+.text-caption {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.text-pink {
+  color: var(--primary);
+}
+
+.text-bold {
+  font-weight: var(--font-weight-semibold);
+}
+
+.text-number {
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Status Badges ── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 1.4;
+}
+
+.badge--live {
+  background: var(--error);
+  color: white;
+}
+
+.badge--online {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.badge--offline {
+  background: rgba(100, 116, 139, 0.15);
+  color: var(--text-muted);
+}
+
+.badge--connected {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.badge--priority {
+  min-width: 24px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.badge--priority-low {
+  background: var(--info);
+  color: white;
+}
+
+.badge--priority-medium {
+  background: var(--purple);
+  color: white;
+}
+
+.badge--priority-high {
+  background: var(--warning);
+  color: white;
+}
+
+.badge--priority-critical {
+  background: var(--error);
+  color: white;
+}
+
+/* ── Status Dot ── */
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-dot--success {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}
+
+.status-dot--error {
+  background: var(--error);
+  box-shadow: 0 0 6px var(--error);
+}
+
+.status-dot--warning {
+  background: var(--warning);
+}
+
+.status-dot--live {
+  background: var(--error);
+  box-shadow: 0 0 6px var(--error);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.status-dot--pink {
+  background: var(--primary);
+  box-shadow: 0 0 6px var(--primary);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── Toggles ── */
+
+.toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: var(--border-default);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--transition-normal);
+  flex-shrink: 0;
+}
+
+.toggle.active {
+  background: var(--primary);
+}
+
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  transition: transform var(--transition-normal);
+}
+
+.toggle.active::after {
+  transform: translateX(16px);
+}
+
+/* ── Progress Bar ── */
+
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--border-default);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.progress-bar__fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: var(--radius-full);
+  transition: width var(--transition-normal);
+}
+
+/* ── Slider ── */
+
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--border-default);
+  border-radius: var(--radius-full);
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--primary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: box-shadow var(--transition-fast);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 8px var(--primary-glow);
+}
+
+/* ── Animations ── */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes giftHighlight {
+  0% { box-shadow: 0 0 0 0 var(--primary-glow-strong); }
+  50% { box-shadow: 0 0 16px 4px var(--primary-glow-strong); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 8px var(--primary-glow); }
+  50% { box-shadow: 0 0 20px var(--primary-glow-strong); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease forwards;
+}
+
+.animate-gift-highlight {
+  animation: giftHighlight 0.8s ease;
+}
+
+.animate-slide-in {
+  animation: slideInRight 0.3s ease forwards;
+}

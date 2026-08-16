@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: nemo-studio
+    runtime: node
+    plan: free        # Đổi thành 'starter' nếu cần always-on
+    buildCommand: npm install && npm run build
+    startCommand: node server/index.js
+    healthCheckPath: /api/engine/state
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false    # Điền tay trong Render dashboard
+      - key: SUPABASE_KEY
+        sync: false    # Điền tay trong Render dashboard

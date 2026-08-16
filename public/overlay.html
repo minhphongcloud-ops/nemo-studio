@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nemo Studio — Avatar Overlay</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      background: transparent !important;
+      overflow: hidden;
+    }
+    #overlay-root {
+      width: 100vw; height: 100vh;
+      position: relative;
+      background: transparent;
+    }
+    canvas {
+      display: block;
+      background: transparent !important;
+    }
+    /* Status badge */
+    #overlay-status {
+      position: fixed;
+      top: 12px; right: 12px;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.1);
+      z-index: 100;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    #overlay-status.visible { opacity: 1; }
+    .sd { width: 6px; height: 6px; border-radius: 50%; background: #64748B; }
+    .sd.ok { background: #22C55E; box-shadow: 0 0 6px #22C55E88; }
+    .sd.er { background: #EF4444; }
+
+    /* Anim badge */
+    #anim-badge {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(233,30,140,0.85);
+      color: #fff;
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 14px;
+      border-radius: 20px;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      backdrop-filter: blur(8px);
+      z-index: 100;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    #anim-badge.show { display: flex; }
+  </style>
+</head>
+<body>
+  <div id="overlay-root"></div>
+  <div id="overlay-status">
+    <span class="sd" id="status-dot"></span>
+    <span id="status-text">Đang kết nối...</span>
+  </div>
+  <div id="anim-badge">▶ <span id="anim-name"></span></div>
+
+  <!-- Socket.IO từ server backend -->
+  <script src="http://localhost:3001/socket.io/socket.io.js"></script>
+
+  <!-- Three.js + VRM từ CDN -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+      "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.2.0/lib/three-vrm.module.js",
+      "@pixiv/three-vrm-animation": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@3.2.0/lib/three-vrm-animation.module.js"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+    import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+
+    // ── Setup Three.js ──────────────────────────────────────
+    const container = document.getElementById('overlay-root');
+
+    const renderer = new THREE.WebGLRenderer({
+      alpha: true,
+      antialias: true,
+      premultipliedAlpha: false,
+    });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x000000, 0); // transparent
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    container.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
+    camera.position.set(0, 1.2, 3);
+
+    // Lighting
+    const ambLight = new THREE.AmbientLight(0xffffff, 0.8);
+    scene.add(ambLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    dirLight.position.set(1, 2, 2);
+    scene.add(dirLight);
+
+    // Resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ── VRM State ───────────────────────────────────────────
+    let currentVrm = null;
+    let currentMixer = null;
+    let currentAction = null;
+    const clock = new THREE.Clock();
+
+    const loader = new GLTFLoader();
+    loader.register(p => new VRMLoaderPlugin(p));
+    loader.register(p => new VRMAnimationLoaderPlugin(p));
+
+    async function loadVRM(url) {
+      const gltf = await loader.loadAsync(url);
+      const vrm = gltf.userData.vrm;
+      if (!vrm) throw new Error('Không phải file VRM hợp lệ');
+      VRMUtils.removeUnnecessaryJoints(vrm.scene);
+      if (currentVrm) {
+        scene.remove(currentVrm.scene);
+        VRMUtils.deepDispose(currentVrm.scene);
+      }
+      currentVrm = vrm;
+      scene.add(vrm.scene);
+      // Center
+      vrm.scene.position.set(0, 0, 0);
+      updateStatus(true, 'Avatar sẵn sàng');
+    }
+
+    async function loadAndPlayAnimation(url) {
+      if (!currentVrm) return;
+      const gltf = await loader.loadAsync(url);
+      const vrmAnims = gltf.userData.vrmAnimations;
+      if (!vrmAnims?.length) return;
+      const clip = createVRMAnimationClip(vrmAnims[0], currentVrm);
+      if (currentMixer) currentMixer.stopAllAction();
+      currentMixer = new THREE.AnimationMixer(currentVrm.scene);
+      currentAction = currentMixer.clipAction(clip);
+      currentAction.setLoop(THREE.LoopRepeat, Infinity);
+      currentAction.play();
+      showAnimBadge(url.split('/').pop().replace('.vrma',''));
+    }
+
+    // ── Render Loop ─────────────────────────────────────────
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+      if (currentMixer) currentMixer.update(delta);
+      if (currentVrm) currentVrm.update(delta);
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // ── Status UI ───────────────────────────────────────────
+    function updateStatus(ok, text) {
+      const dot = document.getElementById('status-dot');
+      const txt = document.getElementById('status-text');
+      const el  = document.getElementById('overlay-status');
+      dot.className = 'sd ' + (ok ? 'ok' : 'er');
+      txt.textContent = text;
+      el.classList.add('visible');
+      clearTimeout(el._hide);
+      el._hide = setTimeout(() => el.classList.remove('visible'), 3000);
+    }
+
+    function showAnimBadge(name) {
+      const badge = document.getElementById('anim-badge');
+      document.getElementById('anim-name').textContent = name;
+      badge.classList.add('show');
+      clearTimeout(badge._hide);
+      badge._hide = setTimeout(() => badge.classList.remove('show'), 4000);
+    }
+
+    // ── Socket.IO Connection ────────────────────────────────
+    let socket;
+    try {
+      socket = io('http://localhost:3001', { transports: ['websocket'] });
+
+      socket.on('connect', () => {
+        updateStatus(true, '🎉 Kết nối server thành công');
+      });
+
+      socket.on('disconnect', () => {
+        updateStatus(false, 'Mất kết nối server');
+      });
+
+      // Server gửi animation command
+      socket.on('avatar:play', (data) => {
+        if (data.animationUrl) loadAndPlayAnimation(data.animationUrl);
+        else if (data.animationName) showAnimBadge(data.animationName);
+      });
+
+      socket.on('avatar:stop', () => {
+        if (currentMixer) currentMixer.stopAllAction();
+        document.getElementById('anim-badge').classList.remove('show');
+      });
+
+      // Nhận VRM URL để load
+      socket.on('overlay:loadVRM', (data) => {
+        if (data.url) loadVRM(data.url).catch(e => updateStatus(false, 'Lỗi load VRM: ' + e.message));
+      });
+
+      socket.on('connect_error', () => {
+        updateStatus(false, 'Không thể kết nối server (:3001)');
+      });
+
+    } catch (e) {
+      updateStatus(false, 'Socket.IO chưa tải được');
+    }
+
+    // ── URL Params ──────────────────────────────────────────
+    // ?vrm=https://... để load VRM từ URL
+    const params = new URLSearchParams(location.search);
+    const vrmUrl = params.get('vrm');
+    if (vrmUrl) {
+      loadVRM(vrmUrl)
+        .then(() => updateStatus(true, 'VRM đã tải'))
+        .catch(e => updateStatus(false, 'Lỗi: ' + e.message));
+    } else {
+      updateStatus(false, 'Chưa có avatar — thêm ?vrm=URL vào đường dẫn');
+    }
+  </script>
+</body>
+</html>

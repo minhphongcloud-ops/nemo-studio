@@ -1,0 +1,29 @@
+{
+  "name": "nemo-studio",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Nemo Studio — TikTok LIVE & VTuber Control Studio",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "server": "node server/index.js",
+    "start": "node server/index.js",
+    "build": "vite build",
+    "build:all": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "socket.io": "^4.8.0",
+    "tiktok-live-connector": "^1.1.9",
+    "three": "^0.170.0",
+    "@pixiv/three-vrm": "^3.2.0",
+    "@pixiv/three-vrm-animation": "^3.2.0"
+  },
+  "devDependencies": {
+    "vite": "^6.3.5",
+    "socket.io-client": "^4.8.0"
+  }
+}
